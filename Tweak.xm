@@ -9,6 +9,7 @@
 #import "Preferences.h"
 
 static NSMutableArray *assetBundles;
+static NSString *const kRedditFilterMutedWords = @"kRedditFilterMutedWords";
 
 extern "C" UIImage *iconWithName(NSString *iconName) {
   NSArray *commonIconSizes = @[
@@ -67,19 +68,35 @@ static BOOL shouldFilterObject(id object) {
   BOOL isNSFW = [object respondsToSelector:@selector(isNSFW)] && ((Post *)object).isNSFW;
   if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterPromoted] && isAdPost)
     return YES;
-  if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterRecommended] && isRecommendation)
+  if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterRecommended] && isRecommendation)
     return YES;
-  if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterLivestreams] && isLivestream)
+  if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterLivestreams] && isLivestream)
     return YES;
-  if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterNSFW] && isNSFW) return YES;
+  if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterNSFW] && isNSFW) return YES;
   return NO;
 }
 
 static NSArray *filteredObjects(NSArray *objects) {
-  return [objects filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(
-                                                               id object, NSDictionary *bindings) {
-                    return !shouldFilterObject(object);
-                  }]];
+  // ...existing code...
+    
+  // Add muted words filter
+  NSArray *mutedWords = [NSUserDefaults.standardUserDefaults objectForKey:kRedditFilterMutedWords];
+  if (mutedWords.count > 0) {
+    [objects filterUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(id post, NSDictionary *bindings) {
+      NSString *title = [post valueForKey:@"title"];
+      NSString *text = [post valueForKey:@"text"];
+            
+      for (NSString *mutedWord in mutedWords) {
+        if ((title && [title localizedCaseInsensitiveContainsString:mutedWord]) ||
+            (text && [text localizedCaseInsensitiveContainsString:mutedWord])) {
+          return NO;
+        }
+      }
+      return YES;
+    }]];
+  }
+    
+  return objects;
 }
 
 static void filterNode(NSMutableDictionary *node) {
@@ -87,34 +104,34 @@ static void filterNode(NSMutableDictionary *node) {
 
   // Regular post
   if ([node[@"__typename"] isEqualToString:@"SubredditPost"]) {
-    if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAwards]) {
+    if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAwards]) {
       node[@"awardings"] = @[];
       node[@"isGildable"] = @NO;
     }
 
-    if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterScores])
+    if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterScores])
       node[@"isScoreHidden"] = @YES;
 
-    if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterNSFW] &&
+    if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterNSFW] &&
         [node[@"isNsfw"] boolValue])
       node[@"isHidden"] = @YES;
   }
   if ([node[@"__typename"] isEqualToString:@"CellGroup"]) {
     for (NSMutableDictionary *cell in node[@"cells"]) {
       if ([cell[@"__typename"] isEqualToString:@"ActionCell"]) {
-        if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAwards]) {
+        if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAwards]) {
           cell[@"isAwardHidden"] = @YES;
           cell[@"goldenUpvoteInfo"][@"isGildable"] = @NO;
         }
 
-        if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterScores])
+        if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterScores])
           cell[@"isScoreHidden"] = @YES;
       }
     }
   }
 
   // Ad post
-  if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterPromoted]) {
+  if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterPromoted]) {
     if ([node[@"__typename"] isEqualToString:@"AdPost"]) node[@"isHidden"] = @YES;
     if ([node[@"__typename"] isEqualToString:@"CellGroup"] &&
         [node[@"adPayload"] isKindOfClass:NSDictionary.class])
@@ -122,24 +139,24 @@ static void filterNode(NSMutableDictionary *node) {
   }
 
   // Recommendation
-  if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterRecommended]) {
+  if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterRecommended]) {
     if ([node[@"__typename"] isEqualToString:@"CellGroup"] && ![node[@"recommendationContext"] isEqual:[NSNull null]])
       node[@"cells"] = @[];
   }
 
   // Comment
   if ([node[@"__typename"] isEqualToString:@"Comment"]) {
-    if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAwards]) {
+    if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAwards]) {
       node[@"awardings"] = @[];
       node[@"isGildable"] = @NO;
     }
 
-    if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterScores])
+    if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterScores])
       node[@"isScoreHidden"] = @YES;
 
     if ([node[@"authorInfo"] isKindOfClass:NSDictionary.class] &&
         [node[@"authorInfo"][@"id"] isEqualToString:@"t2_6l4z3"] &&
-        [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAutoCollapseAutoMod])
+        [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAutoCollapseAutoMod])
       node[@"isInitiallyCollapsed"] = @YES;
   }
 }
@@ -172,11 +189,11 @@ static void filterNode(NSMutableDictionary *node) {
                   filterNode(tree[@"node"]);
 
               if (root[@"commentsPageAds"] &&
-                  [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterPromoted])
+                  [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterPromoted])
                 root[@"commentsPageAds"] = @[];
 
               if (root[@"recommendations"] &&
-                  [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterRecommended])
+                  [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterRecommended])
                 root[@"recommendations"] = @[];
 
             } else if ([root isKindOfClass:NSArray.class]) {
@@ -211,11 +228,11 @@ static void filterNode(NSMutableDictionary *node) {
 
 %hook PostDetailPresenter
 - (BOOL)shouldFetchCommentAdPost {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterPromoted] ? NO
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterPromoted] ? NO
                                                                                 : %orig;
 }
 - (BOOL)shouldFetchAdditionalCommentAdPosts {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterPromoted] ? NO
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterPromoted] ? NO
                                                                                 : %orig;
 }
 %end
@@ -225,21 +242,21 @@ static void filterNode(NSMutableDictionary *node) {
                                 source:(NSInteger)source
                  deeplinkSubredditName:(id)deeplinkSubredditName
                        streamingConfig:(id)streamingConfig {
-  if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterLivestreams]) return nil;
+  if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterLivestreams]) return nil;
   return %orig;
 }
 - (instancetype)initWithService:(id)service
                          source:(NSInteger)source
           deeplinkSubredditName:(id)deeplinkSubredditName
                 streamingConfig:(id)streamingConfig {
-  if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterLivestreams]) return nil;
+  if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterLivestreams]) return nil;
   return %orig;
 }
 %end
 
 %hook Carousel
 - (BOOL)isHiddenByUserWithAccountSettings:(id)accountSettings {
-  return ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterRecommended] &&
+  return ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterRecommended] &&
           ([self.analyticType containsString:@"recommended"] ||
            [self.analyticType containsString:@"similar"] ||
            [self.analyticType containsString:@"popular"])) ||
@@ -249,53 +266,53 @@ static void filterNode(NSMutableDictionary *node) {
 
 %hook QuickActionViewModel
 - (void)fetchActions {
-  if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterRecommended]) return;
+  if ([NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterRecommended]) return;
   %orig;
 }
 %end
 
 %hook Post
 - (NSArray *)awardingTotals {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAwards] ? nil
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAwards] ? nil
                                                                               : %orig;
 }
 - (NSUInteger)totalAwardsReceived {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAwards] ? 0
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAwards] ? 0
                                                                               : %orig;
 }
 - (BOOL)canAward {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAwards] ? NO
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAwards] ? NO
                                                                               : %orig;
 }
 - (BOOL)isScoreHidden {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterScores] ? YES
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterScores] ? YES
                                                                               : %orig;
 }
 %end
 
 %hook Comment
 - (NSArray *)awardingTotals {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAwards] ? nil
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAwards] ? nil
                                                                               : %orig;
 }
 - (NSUInteger)totalAwardsReceived {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAwards] ? 0
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAwards] ? 0
                                                                               : %orig;
 }
 - (BOOL)canAward {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAwards] ? NO
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAwards] ? NO
                                                                               : %orig;
 }
 - (BOOL)shouldHighlightForHighAward {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAwards] ? NO
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAwards] ? NO
                                                                               : %orig;
 }
 - (BOOL)isScoreHidden {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterScores] ? YES
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterScores] ? YES
                                                                               : %orig;
 }
 - (BOOL)shouldAutoCollapse {
-  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAutoCollapseAutoMod] &&
+  return [NSUserDefaults.standardUserDefaults boolForKey{kRedditFilterAutoCollapseAutoMod] &&
                  [((Comment *)self).authorPk isEqualToString:@"t2_6l4z3"]
              ? YES
              : %orig;
