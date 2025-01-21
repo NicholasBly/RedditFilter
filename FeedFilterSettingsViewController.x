@@ -8,6 +8,10 @@ extern Class CoreClass(NSString *name);
 
 static NSString *const kRedditFilterMutedWords = @"kRedditFilterMutedWords";
 
+@interface FeedFilterSettingsViewController : BaseTableViewController <UITextFieldDelegate>
+@property (nonatomic, strong) NSMutableArray *mutedWords;
+@end
+
 %subclass FeedFilterSettingsViewController : BaseTableViewController
 %new
 - (NSMutableArray *)mutedWords {
@@ -184,6 +188,9 @@ static NSString *const kRedditFilterMutedWords = @"kRedditFilterMutedWords";
     case 0:
       label.text = [LOC(@"filter.settings.header", @"Filters") uppercaseString];
       break;
+    case 2:
+      label.text = [LOC(@"filter.settings.muted.header", @"Muted Words") uppercaseString];
+      break;
     default:
       return nil;
   }
@@ -210,6 +217,9 @@ static NSString *const kRedditFilterMutedWords = @"kRedditFilterMutedWords";
     case 0:
       label.text = LOC(@"filter.settings.footer", @"Filter specific types of posts from your feed");
       break;
+    case 2:
+      label.text = LOC(@"filter.settings.muted.footer", @"Posts containing these words will be hidden");
+      break;
     default:
       return nil;
   }
@@ -226,6 +236,8 @@ static NSString *const kRedditFilterMutedWords = @"kRedditFilterMutedWords";
          forCellReuseIdentifier:kToggleCellID];
   [self.tableView registerClass:CoreClass(@"ImageLabelTableViewCell")
          forCellReuseIdentifier:kLabelCellID];
+  NSArray *saved = [NSUserDefaults.standardUserDefaults objectForKey:kRedditFilterMutedWords];
+  self.mutedWords = saved ? [saved mutableCopy] : [NSMutableArray new];
 }
 %new
 - (void)didTogglePromotedSwitch:(UISwitch *)sender {
@@ -256,22 +268,27 @@ static NSString *const kRedditFilterMutedWords = @"kRedditFilterMutedWords";
   [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kRedditFilterAutoCollapseAutoMod];
 }
 %new
-- (void)textFieldShouldReturn:(UITextField *)textField {
+- (BOOL)textFieldShouldReturn:(UITextField *)textField {
   if (textField.text.length > 0) {
-    NSMutableArray *words = self.mutedWords;
-    [words addObject:textField.text];
-    [NSUserDefaults.standardUserDefaults setObject:words forKey:kRedditFilterMutedWords];
+    [self.mutedWords addObject:textField.text];
+    [NSUserDefaults.standardUserDefaults setObject:self.mutedWords forKey:kRedditFilterMutedWords];
+    [NSUserDefaults.standardUserDefaults synchronize];
     textField.text = @"";
     [self.tableView reloadData];
   }
   [textField resignFirstResponder];
+  return YES;
+}
+%new
+- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
+  return indexPath.section == 2 && indexPath.row > 0;
 }
 %new
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
-  if (indexPath.section == 2 && indexPath.row > 0) {
-    NSMutableArray *words = self.mutedWords;
-    [words removeObjectAtIndex:indexPath.row - 1];
-    [NSUserDefaults.standardUserDefaults setObject:words forKey:kRedditFilterMutedWords];
+  if (indexPath.section == 2 && indexPath.row > 0 && editingStyle == UITableViewCellEditingStyleDelete) {
+    [self.mutedWords removeObjectAtIndex:indexPath.row - 1];
+    [NSUserDefaults.standardUserDefaults setObject:self.mutedWords forKey:kRedditFilterMutedWords];
+    [NSUserDefaults.standardUserDefaults synchronize];
     [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
   }
 }
