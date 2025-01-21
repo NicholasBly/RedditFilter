@@ -76,27 +76,43 @@ static BOOL shouldFilterObject(id object) {
   return NO;
 }
 
-static NSArray *filteredObjects(NSArray *objects) {
-  // ...existing code...
-    
-  // Add muted words filter
-  NSArray *mutedWords = [NSUserDefaults.standardUserDefaults objectForKey:kRedditFilterMutedWords];
-  if (mutedWords.count > 0) {
-    [objects filterUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(id post, NSDictionary *bindings) {
-      NSString *title = [post valueForKey:@"title"];
-      NSString *text = [post valueForKey:@"text"];
-            
-      for (NSString *mutedWord in mutedWords) {
-        if ((title && [title localizedCaseInsensitiveContainsString:mutedWord]) ||
-            (text && [text localizedCaseInsensitiveContainsString:mutedWord])) {
-          return NO;
+static BOOL containsMutedWords(NSString *text) {
+    if (!text) return NO;
+    NSArray *mutedWords = [NSUserDefaults.standardUserDefaults objectForKey:kRedditFilterMutedWords];
+    for (NSString *word in mutedWords) {
+        if ([text localizedCaseInsensitiveContainsString:word]) {
+            return YES;
         }
-      }
-      return YES;
-    }]];
-  }
+    }
+    return NO;
+}
+
+static NSArray *filteredObjects(NSArray *objects) {
+    if (!objects) return nil;
+    NSMutableArray *filtered = [NSMutableArray new];
     
-  return objects;
+    for (id post in objects) {
+        if (![post isKindOfClass:%c(Post)]) {
+            [filtered addObject:post];
+            continue;
+        }
+        
+        // Check muted words
+        NSString *title = [post valueForKey:@"title"];
+        NSString *text = [post valueForKey:@"selftext"];
+        if (containsMutedWords(title) || containsMutedWords(text)) {
+            continue;
+        }
+        
+        // Existing filters
+        if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterPromoted] && 
+            [[post valueForKey:@"promoted"] boolValue]) {
+            continue;
+        }
+        
+        [filtered addObject:post];
+    }
+    return filtered;
 }
 
 static void filterNode(NSMutableDictionary *node) {
@@ -212,17 +228,18 @@ static void filterNode(NSMutableDictionary *node) {
 %group Legacy
 
 %hook Listing
-- (void)fetchNextPage:(id (^)(NSArray *, id))completionHandler {
-  id (^newCompletionHandler)(NSArray *, id) = ^(NSArray *objects, id _) {
-    return completionHandler(filteredObjects(objects), _);
-  };
-  return %orig(newCompletionHandler);
+- (void)fetchNextPage:(id)completion {
+    %orig(^(NSArray *objects, id response) {
+        if (completion) {
+            completion(filteredObjects(objects), response);
+        }
+    });
 }
 %end
 
 %hook FeedNetworkSource
 - (NSArray *)postsAndCommentsFromData:(id)data {
-  return filteredObjects(%orig);
+    return filteredObjects(%orig);
 }
 %end
 
