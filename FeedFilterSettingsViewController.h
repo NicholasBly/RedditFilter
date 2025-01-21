@@ -15,5 +15,6 @@
 - (UIImage *)imageScaledToSize:(CGSize)size;
 @end
 
-@interface FeedFilterSettingsViewController : BaseTableViewController
+@interface FeedFilterSettingsViewController : BaseTableViewController <UITextFieldDelegate>
+@property (nonatomic, strong) NSMutableArray *mutedWords;
 @end
