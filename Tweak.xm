@@ -337,3 +337,83 @@ static void filterNode(NSMutableDictionary *node) {
 }
 - (BOOL)shouldAutoCollapse {
   return [NSUserDefaults.standardUserDefaults boolForKey:k
+- (BOOL)shouldAutoCollapse {
+  return [NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterAutoCollapseAutoMod] &&
+                 [((Comment *)self).authorPk isEqualToString:@"t2_6l4z3"]
+             ? YES
+             : %orig;
+}
+%end
+
+%hook ToggleImageTableViewCell
+- (void)updateConstraints {
+  %orig;
+  UIStackView *horizontalStackView =
+      [self respondsToSelector:@selector(imageLabelView)]
+          ? [self imageLabelView].horizontalStackView
+          : object_getIvar(self,
+                           class_getInstanceVariable(object_getClass(self), "horizontalStackView"));
+  UILabel *detailLabel = [self respondsToSelector:@selector(imageLabelView)]
+                             ? [self imageLabelView].detailLabel
+                             : [self detailLabel];
+  if (!horizontalStackView || !detailLabel) return;
+  if (detailLabel.text) {
+    UIView *contentView = [self contentView];
+    [contentView addConstraints:@[
+      [NSLayoutConstraint constraintWithItem:detailLabel
+                                   attribute:NSLayoutAttributeHeight
+                                   relatedBy:NSLayoutRelationEqual
+                                      toItem:horizontalStackView
+                                   attribute:NSLayoutAttributeHeight
+                                  multiplier:.33
+                                    constant:0],
+      [NSLayoutConstraint constraintWithItem:horizontalStackView
+                                   attribute:NSLayoutAttributeHeight
+                                   relatedBy:NSLayoutRelationEqual
+                                      toItem:contentView
+                                   attribute:NSLayoutAttributeHeight
+                                  multiplier:1
+                                    constant:0],
+      [NSLayoutConstraint constraintWithItem:horizontalStackView
+                                   attribute:NSLayoutAttributeCenterY
+                                   relatedBy:NSLayoutRelationEqual
+                                      toItem:contentView
+                                   attribute:NSLayoutAttributeCenterY
+                                  multiplier:1
+                                    constant:0]
+    ]];
+  }
+}
+%end
+
+%end
+
+%ctor {
+  assetBundles = [NSMutableArray new];
+  [assetBundles addObject:NSBundle.mainBundle];
+  for (NSString *file in
+       [NSFileManager.defaultManager contentsOfDirectoryAtPath:NSBundle.mainBundle.bundlePath
+                                                         error:nil]) {
+    if (![file hasSuffix:@"bundle"]) continue;
+    NSBundle *bundle = [NSBundle
+        bundleWithPath:[NSBundle.mainBundle pathForResource:[file stringByDeletingPathExtension]
+                                                     ofType:@"bundle"]];
+    if (bundle) [assetBundles addObject:bundle];
+  }
+  for (NSString *file in [NSFileManager.defaultManager
+           contentsOfDirectoryAtPath:[NSBundle.mainBundle.bundlePath
+                                         stringByAppendingPathComponent:@"Frameworks"]
+                               error:nil]) {
+    if (![file hasSuffix:@"framework"]) continue;
+    NSBundle *bundle = [NSBundle
+        bundleWithPath:[NSBundle.mainBundle pathForResource:[file stringByDeletingPathExtension]
+                                                     ofType:@"framework"
+                                                inDirectory:@"Frameworks"]];
+    if (bundle) [assetBundles addObject:bundle];
+  }
+  %init;
+  %init(Legacy, Comment = CoreClass(@"Comment"), Post = CoreClass(@"Post"),
+                   QuickActionViewModel = CoreClass(@"QuickActionViewModel"),
+                   StreamManager = CoreClass(@"StreamManager"),
+                   ToggleImageTableViewCell = CoreClass(@"ToggleImageTableViewCell"));
+}
