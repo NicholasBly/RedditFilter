@@ -195,6 +195,19 @@ extern Class CoreClass(NSString *name);
          forCellReuseIdentifier:kToggleCellID];
   [self.tableView registerClass:CoreClass(@"ImageLabelTableViewCell")
          forCellReuseIdentifier:kLabelCellID];
+
+  // Add a text box for muted words
+  UITextField *mutedWordsTextField = [[UITextField alloc] initWithFrame:CGRectMake(20, 100, 280, 40)];
+  mutedWordsTextField.placeholder = @"Enter muted words separated by commas";
+  [self.view addSubview:mutedWordsTextField];
+  self.mutedWordsTextField = mutedWordsTextField;
+
+  // Add a button to save muted words
+  UIButton *saveMutedWordsButton = [UIButton buttonWithType:UIButtonTypeSystem];
+  saveMutedWordsButton.frame = CGRectMake(20, 150, 280, 40);
+  [saveMutedWordsButton setTitle:@"Save Muted Words" forState:UIControlStateNormal];
+  [saveMutedWordsButton addTarget:self action:@selector(saveMutedWords:) forControlEvents:UIControlEventTouchUpInside];
+  [self.view addSubview:saveMutedWordsButton];
 }
 %new
 - (void)didTogglePromotedSwitch:(UISwitch *)sender {
@@ -223,5 +236,44 @@ extern Class CoreClass(NSString *name);
 %new
 - (void)didToggleAutoCollapseAutoModSwitch:(UISwitch *)sender {
   [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kRedditFilterAutoCollapseAutoMod];
+}
+%new
+- (IBAction)saveMutedWords:(id)sender {
+    NSString *mutedWordsString = self.mutedWordsTextField.text;
+    NSArray *mutedWordsArray = [mutedWordsString componentsSeparatedByString:@","];
+    filter.settings.muted = mutedWordsArray;
+    [self saveMutedWordsToStorage:mutedWordsArray];
+}
+
+// Method to save muted words to storage
+- (void)saveMutedWordsToStorage:(NSArray *)mutedWords {
+    // Implement the logic to save muted words to storage (e.g., UserDefaults, a file, etc.)
+    [[NSUserDefaults standardUserDefaults] setObject:mutedWords forKey:@"mutedWords"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
+// Method to load muted words from storage
+- (NSArray *)loadMutedWordsFromStorage {
+    NSArray *mutedWords = [[NSUserDefaults standardUserDefaults] objectForKey:@"mutedWords"];
+    return mutedWords ? mutedWords : @[];
+}
+
+// Method to filter posts based on muted words
+- (NSArray *)filterPosts:(NSArray *)posts {
+    NSArray *mutedWords = [self loadMutedWordsFromStorage];
+    NSMutableArray *filteredPosts = [NSMutableArray array];
+    for (NSString *post in posts) {
+        BOOL shouldMute = NO;
+        for (NSString *mutedWord in mutedWords) {
+            if ([post containsString:mutedWord]) {
+                shouldMute = YES;
+                break;
+            }
+        }
+        if (!shouldMute) {
+            [filteredPosts addObject:post];
+        }
+    }
+    return filteredPosts;
 }
 %end
