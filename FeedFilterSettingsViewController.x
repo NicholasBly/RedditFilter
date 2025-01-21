@@ -13,6 +13,9 @@ static NSString *const kRedditFilterMutedWords = @"kRedditFilterMutedWords";
 @end
 
 %subclass FeedFilterSettingsViewController : BaseTableViewController
+
+%property (nonatomic, strong) NSMutableArray *mutedWords;
+
 %new
 - (NSMutableArray *)mutedWords {
     NSArray *saved = [NSUserDefaults.standardUserDefaults objectForKey:kRedditFilterMutedWords];
