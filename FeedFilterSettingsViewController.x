@@ -236,7 +236,7 @@ static NSString *const kRedditFilterMutedWords = @"kRedditFilterMutedWords";
          forCellReuseIdentifier:kToggleCellID];
   [self.tableView registerClass:CoreClass(@"ImageLabelTableViewCell")
          forCellReuseIdentifier:kLabelCellID];
-  NSArray *saved = [NSUserDefaults.standardUserDefaults objectForKey:kRedditFilterMutedWords];
+  NSArray *saved = [NSUserDefaults.standardUserDefaults objectForKey(kRedditFilterMutedWords)];
   self.mutedWords = saved ? [saved mutableCopy] : [NSMutableArray new];
 }
 %new
