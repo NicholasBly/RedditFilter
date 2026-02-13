@@ -72,11 +72,13 @@ extern NSString *localizedString(NSString *key, NSString *table);
             }
         }
 
-        UIBarButtonItem *filterButton = [[UIBarButtonItem alloc] initWithTitle:@"Filter"
+        UIBarButtonItem *filterButton = [[UIBarButtonItem alloc] initWithTitle:@"RedditFilter"
                                                                          style:UIBarButtonItemStylePlain
                                                                         target:self
                                                                         action:@selector(openRedditFilterFromNav)];
         filterButton.tag = 1337; // Tag to identify our button
+
+        [filterButton setTitlePositionAdjustment:UIOffsetMake(0, 3.5) forBarMetrics:UIBarMetricsDefault];
 
         // 5. Add it to the Navigation Bar
         NSMutableArray *items = [self.navigationItem.rightBarButtonItems mutableCopy];
