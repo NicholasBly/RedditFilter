@@ -57,8 +57,8 @@ extern NSString *localizedString(NSString *key, NSString *table);
 
 %hook UIViewController
 
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
+- (void)viewWillAppear:(BOOL)animated {
+   %orig;
 
     NSString *name = NSStringFromClass([self class]);
 
