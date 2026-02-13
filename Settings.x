@@ -7,6 +7,10 @@ NSBundle *redditFilterBundle;
 extern UIImage *iconWithName(NSString *iconName);
 extern NSString *localizedString(NSString *key, NSString *table);
 
+@interface UserDrawerViewController ()
+- (void)navigateToRedditFilterSettings;
+@end
+
 // We keep this just in case the side menu still works, as it provides a backup entry point.
 %hook UserDrawerViewController
 
