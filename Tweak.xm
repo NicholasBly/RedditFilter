@@ -258,13 +258,15 @@ static void filterNode(NSMutableDictionary *node) {
 
         // Fast Path by known schemas
         if ([operationName isEqualToString:@"HomeFeedSdui"]) {
+            NSLog(@"[RedditFilter] SUCCESS: Hit fast path for HomeFeedSdui");
             if ([json valueForKeyPath:@"data.homeV3.elements.edges"]) {
                 for (NSMutableDictionary *edge in json[@"data"][@"homeV3"][@"elements"][@"edges"]) {
                     filterNode(edge[@"node"]);
                 }
             }
         } else if ([operationName isEqualToString:@"PopularFeedSdui"]) {
-            // NEW: Fast path for Recommended and Promoted posts in the Popular feed
+            // Fast path for Recommended and Promoted posts in the Popular feed
+            NSLog(@"[RedditFilter] SUCCESS: Hit fast path for PopularFeedSdui");
             if ([json valueForKeyPath:@"data.popularV3.elements.edges"]) {
                 for (NSMutableDictionary *edge in json[@"data"][@"popularV3"][@"elements"][@"edges"]) {
                     filterNode(edge[@"node"]);
@@ -288,6 +290,7 @@ static void filterNode(NSMutableDictionary *node) {
             }
         } else {
             // Original recursive logic for unknown queries fallback
+            NSLog(@"[RedditFilter] FALLBACK: Used slow recursive method for %@", operationName);
             if (json[@"data"] && [json[@"data"] isKindOfClass:NSDictionary.class]) {
                 NSDictionary *dataDict = json[@"data"];
                 NSMutableDictionary *root = dataDict.allValues.firstObject;
