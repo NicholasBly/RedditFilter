@@ -8,6 +8,21 @@
 #import <objc/runtime.h>
 #import "Preferences.h"
 
+static void appendValidationLog(NSString *logString) {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+        NSString *docDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+        NSString *logPath = [docDir stringByAppendingPathComponent:@"RedditFilter_Validation.txt"];
+        NSFileHandle *fileHandle = [NSFileHandle fileHandleForWritingAtPath:logPath];
+        if (!fileHandle) {
+            [logString writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        } else {
+            [fileHandle seekToEndOfFile];
+            [fileHandle writeData:[logString dataUsingEncoding:NSUTF8StringEncoding]];
+            [fileHandle closeFile];
+        }
+    });
+}
+
 // --- Cache Setup ---
 static NSCache *imageCache;
 static NSCache *stringCache;
@@ -258,7 +273,7 @@ static void filterNode(NSMutableDictionary *node) {
 
         // Fast Path by known schemas
         if ([operationName isEqualToString:@"HomeFeedSdui"]) {
-            NSLog(@"[RedditFilter] SUCCESS: Hit fast path for HomeFeedSdui");
+            appendValidationLog(@"SUCCESS: Hit fast path for HomeFeedSdui\n");
             if ([json valueForKeyPath:@"data.homeV3.elements.edges"]) {
                 for (NSMutableDictionary *edge in json[@"data"][@"homeV3"][@"elements"][@"edges"]) {
                     filterNode(edge[@"node"]);
@@ -266,7 +281,7 @@ static void filterNode(NSMutableDictionary *node) {
             }
         } else if ([operationName isEqualToString:@"PopularFeedSdui"]) {
             // Fast path for Recommended and Promoted posts in the Popular feed
-            NSLog(@"[RedditFilter] SUCCESS: Hit fast path for PopularFeedSdui");
+            appendValidationLog(@"SUCCESS: Hit fast path for PopularFeedSdui\n");
             if ([json valueForKeyPath:@"data.popularV3.elements.edges"]) {
                 for (NSMutableDictionary *edge in json[@"data"][@"popularV3"][@"elements"][@"edges"]) {
                     filterNode(edge[@"node"]);
@@ -290,7 +305,7 @@ static void filterNode(NSMutableDictionary *node) {
             }
         } else {
             // Original recursive logic for unknown queries fallback
-            NSLog(@"[RedditFilter] FALLBACK: Used slow recursive method for %@", operationName);
+            appendValidationLog([NSString stringWithFormat:@"FALLBACK: Used slow recursive method for %@\n", operationName]);
             if (json[@"data"] && [json[@"data"] isKindOfClass:NSDictionary.class]) {
                 NSDictionary *dataDict = json[@"data"];
                 NSMutableDictionary *root = dataDict.allValues.firstObject;
