@@ -8,21 +8,6 @@
 #import <objc/runtime.h>
 #import "Preferences.h"
 
-static void appendValidationLog(NSString *logString) {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-        NSString *docDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-        NSString *logPath = [docDir stringByAppendingPathComponent:@"RedditFilter_Validation.txt"];
-        NSFileHandle *fileHandle = [NSFileHandle fileHandleForWritingAtPath:logPath];
-        if (!fileHandle) {
-            [logString writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        } else {
-            [fileHandle seekToEndOfFile];
-            [fileHandle writeData:[logString dataUsingEncoding:NSUTF8StringEncoding]];
-            [fileHandle closeFile];
-        }
-    });
-}
-
 // --- Cache Setup ---
 static NSCache *imageCache;
 static NSCache *stringCache;
@@ -271,17 +256,36 @@ static void filterNode(NSMutableDictionary *node) {
             }
         }
 
-        // Fast Path by known schemas
+        // Ignore Telemetry & Configs (MASSIVE Performance Save)
+        // These requests do not contain feed posts or comments, so we do not need to filter them.
+        NSArray *ignoredOperations = @[
+            @"GetAccount", @"FetchIdentityPreferences", @"DynamicConfigsByNames",
+            @"GetAllExperimentVariants", @"AdsOffRedditLocation", @"UserLocation",
+            @"CookiePreferences", @"FetchSubscribedSubreddits", @"AdsOffRedditPreferences",
+            @"Age", @"RecommendedPrompts", @"EnrollInGamification", @"BadgeCounts",
+            @"GetEligibleUXExperiences", @"GetUserAdEligibility", @"GoldBalances",
+            @"PaymentSubscriptions", @"FeaturedDevvitGame", @"ModQueueNewItemCount",
+            @"LastModeratedSubredditName", @"AwardProductOffers", @"BlockedRedditors",
+            @"GamesPreferences", @"GetRedditUsersByIds", @"SubredditsForNames",
+            @"SubredditsForIds", @"ExposeExperimentBatch", @"GetProfilePostFlairTemplates",
+            @"GetRedditorByNameApollo", @"GetActiveSubreddits", @"GetMyShowcaseCarousel",
+            @"UserPublicTrophies", @"PostDraftsCount", @"BrandToolsStatus",
+            @"NotificationInbox", @"TrendingSearchesQuery"
+        ];
+        
+        if ([ignoredOperations containsObject:operationName]) {
+            // Instantly return the unmodified data. Do not log, do not traverse.
+            return completionHandler(data, response, error);
+        }
+
+        // 3. Fast Path Optimizations based on known schemas
         if ([operationName isEqualToString:@"HomeFeedSdui"]) {
-            appendValidationLog(@"SUCCESS: Hit fast path for HomeFeedSdui\n");
             if ([json valueForKeyPath:@"data.homeV3.elements.edges"]) {
                 for (NSMutableDictionary *edge in json[@"data"][@"homeV3"][@"elements"][@"edges"]) {
                     filterNode(edge[@"node"]);
                 }
             }
         } else if ([operationName isEqualToString:@"PopularFeedSdui"]) {
-            // Fast path for Recommended and Promoted posts in the Popular feed
-            appendValidationLog(@"SUCCESS: Hit fast path for PopularFeedSdui\n");
             if ([json valueForKeyPath:@"data.popularV3.elements.edges"]) {
                 for (NSMutableDictionary *edge in json[@"data"][@"popularV3"][@"elements"][@"edges"]) {
                     filterNode(edge[@"node"]);
@@ -294,7 +298,6 @@ static void filterNode(NSMutableDictionary *node) {
                 }
             }
         } else if ([operationName isEqualToString:@"PostInfoByIdComments"] || [operationName isEqualToString:@"PostInfoById"]) {
-            // This path automatically handles AutoMod, Awards, and NSFW inside comments
             if ([json valueForKeyPath:@"data.postInfoById.commentForest.trees"]) {
                 for (NSMutableDictionary *tree in json[@"data"][@"postInfoById"][@"commentForest"][@"trees"]) {
                     filterNode(tree[@"node"]);
@@ -303,9 +306,18 @@ static void filterNode(NSMutableDictionary *node) {
             if ([json valueForKeyPath:@"data.postInfoById"]) {
                 filterNode(json[@"data"][@"postInfoById"]);
             }
+        } else if ([operationName isEqualToString:@"PdpCommentsAds"]) {
+            // Instantly clear out Comment Ads
+            if ([NSUserDefaults.standardUserDefaults boolForKey:kRedditFilterPromoted]) {
+                if (json[@"data"] && [json[@"data"] isKindOfClass:NSDictionary.class]) {
+                    NSMutableDictionary *dataDict = json[@"data"];
+                    if (dataDict.allValues.firstObject[@"pdpCommentsAds"]) {
+                        dataDict.allValues.firstObject[@"pdpCommentsAds"] = @[];
+                    }
+                }
+            }
         } else {
-            // Original recursive logic for unknown queries fallback
-            appendValidationLog([NSString stringWithFormat:@"FALLBACK: Used slow recursive method for %@\n", operationName]);
+            // Original recursive logic for unknown queries (like ProfileFeedSdui)
             if (json[@"data"] && [json[@"data"] isKindOfClass:NSDictionary.class]) {
                 NSDictionary *dataDict = json[@"data"];
                 NSMutableDictionary *root = dataDict.allValues.firstObject;
@@ -329,7 +341,7 @@ static void filterNode(NSMutableDictionary *node) {
                   if (root[@"commentTreeAds"] && filterPromoted)
                     root[@"commentTreeAds"] = @[];
                   
-                  if (root[@"pdpCommentsAds"] && filterPromoted)
+                  if (root[@"pdpCommentsAds"] && filterPromoted) // Kept just in case the fast path misses
                     root[@"pdpCommentsAds"] = @[];
                   
                   if (root[@"recommendations"] && [defaults boolForKey:kRedditFilterRecommended])
@@ -433,7 +445,7 @@ static void filterNode(NSMutableDictionary *node) {
 - (void)updateConstraints {
     %orig;
 
-    // Fix: Prevent adding duplicate constraints if updateConstraints is called multiple times.
+    // Prevent adding duplicate constraints if updateConstraints is called multiple times.
     // Use an associated object to track if we've already done this.
     NSNumber *constraintsAdded = objc_getAssociatedObject(self, @selector(updateConstraints));
     if (constraintsAdded.boolValue) return;
@@ -518,7 +530,7 @@ static void filterNode(NSMutableDictionary *node) {
     if (!error) [assetCatalogs addObject:catalog];
   }
   
-  // Fix: Correct keys used for default values. Previously all checks were for kRedditFilterPromoted.
+  // Correct keys used for default values. Previously all checks were for kRedditFilterPromoted.
   NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
   
   if (![defaults objectForKey:kRedditFilterPromoted])
