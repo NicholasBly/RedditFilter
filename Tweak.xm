@@ -8,6 +8,55 @@
 #import <objc/runtime.h>
 #import "Preferences.h"
 
+static void appendLogToFile(NSString *logString) {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+        NSString *docDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+        NSString *logPath = [docDir stringByAppendingPathComponent:@"RedditFilter_SchemaPaths.txt"];
+        NSFileHandle *fileHandle = [NSFileHandle fileHandleForWritingAtPath:logPath];
+        if (!fileHandle) {
+            [logString writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        } else {
+            [fileHandle seekToEndOfFile];
+            [fileHandle writeData:[logString dataUsingEncoding:NSUTF8StringEncoding]];
+            [fileHandle closeFile];
+        }
+    });
+}
+
+static void findInterestingPaths(id node, NSString *currentPath, NSString *operationName) {
+    if ([node isKindOfClass:NSDictionary.class]) {
+        NSDictionary *dict = (NSDictionary *)node;
+        
+        if (dict[@"__typename"] && [dict[@"__typename"] isEqualToString:@"AdPost"]) {
+            appendLogToFile([NSString stringWithFormat:@"[%@] Promoted/Ad (AdPost) at: %@\n", operationName, currentPath]);
+        }
+        if (dict[@"adPayload"]) {
+            appendLogToFile([NSString stringWithFormat:@"[%@] Promoted/Ad (adPayload) at: %@\n", operationName, currentPath]);
+        }
+        if (dict[@"recommendationContext"] && ![dict[@"recommendationContext"] isEqual:[NSNull null]]) {
+            appendLogToFile([NSString stringWithFormat:@"[%@] Recommended at: %@\n", operationName, currentPath]);
+        }
+        if (dict[@"isNsfw"] && [dict[@"isNsfw"] boolValue]) {
+            appendLogToFile([NSString stringWithFormat:@"[%@] NSFW at: %@\n", operationName, currentPath]);
+        }
+        if (dict[@"awardings"] && [(NSArray *)dict[@"awardings"] count] > 0) {
+            appendLogToFile([NSString stringWithFormat:@"[%@] Awards at: %@\n", operationName, currentPath]);
+        }
+        if ([dict[@"authorInfo"] isKindOfClass:NSDictionary.class] && [dict[@"authorInfo"][@"id"] isEqualToString:@"t2_6l4z3"]) {
+            appendLogToFile([NSString stringWithFormat:@"[%@] AutoMod at: %@\n", operationName, currentPath]);
+        }
+        
+        for (NSString *key in dict) {
+            findInterestingPaths(dict[key], [NSString stringWithFormat:@"%@.%@", currentPath, key], operationName);
+        }
+    } else if ([node isKindOfClass:NSArray.class]) {
+        NSArray *arr = (NSArray *)node;
+        for (NSUInteger i = 0; i < arr.count; i++) {
+            findInterestingPaths(arr[i], [NSString stringWithFormat:@"%@[%lu]", currentPath, (unsigned long)i], operationName);
+        }
+    }
+}
+
 // --- Cache Setup ---
 static NSCache *imageCache;
 static NSCache *stringCache;
@@ -238,6 +287,27 @@ static void filterNode(NSMutableDictionary *node) {
         }
 
         NSMutableDictionary *json = (NSMutableDictionary *)jsonObject;
+
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+            NSString *operationName = @"Unknown";
+            if (request.HTTPBody) {
+                NSDictionary *bodyJson = [NSJSONSerialization JSONObjectWithData:request.HTTPBody options:0 error:nil];
+                if (bodyJson[@"id"]) operationName = bodyJson[@"id"];
+                else if (bodyJson[@"operationName"]) operationName = bodyJson[@"operationName"];
+            } else if ([request.URL.query containsString:@"operationName="]) {
+                NSArray *components = [request.URL.query componentsSeparatedByString:@"&"];
+                for (NSString *param in components) {
+                    if ([param hasPrefix:@"operationName="]) {
+                        operationName = [param substringFromIndex:14];
+                        break;
+                    }
+                }
+            }
+            // Only log operations we actually care about so the file doesn't get massive
+            if ([operationName containsString:@"Feed"] || [operationName containsString:@"Post"] || [operationName containsString:@"Comments"]) {
+                findInterestingPaths(json, @"root", operationName);
+            }
+        });
         
         if (json[@"data"] && [json[@"data"] isKindOfClass:NSDictionary.class]) {
             NSDictionary *dataDict = json[@"data"];
