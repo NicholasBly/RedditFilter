@@ -11,6 +11,16 @@
 // --- Cache Setup ---
 static NSCache *imageCache;
 static NSCache *stringCache;
+static NSSet<NSString *> *ignoredOperationsSet;
+
+typedef struct {
+    BOOL promoted;
+    BOOL recommended;
+    BOOL nsfw;
+    BOOL awards;
+    BOOL scores;
+    BOOL automod;
+} RedditFilterPrefs;
 
 @interface CUICatalog : NSObject {
   NSBundle *_bundle;
@@ -126,95 +136,86 @@ static NSArray *filteredObjects(NSArray *objects) {
     }]];
 }
 
-static void filterNode(NSMutableDictionary *node) {
-  if (![node isKindOfClass:NSMutableDictionary.class]) return;
+static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
+    if (![node isKindOfClass:NSMutableDictionary.class]) return;
 
-  NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    // Fetch typeName once and ensure it is a valid string to prevent unrecognized selector crashes
+    NSString *typeName = node[@"__typename"];
+    if (![typeName isKindOfClass:NSString.class]) return;
 
-  // Regular post
-  if ([node[@"__typename"] isEqualToString:@"SubredditPost"]) {
-    if ([defaults boolForKey:kRedditFilterAwards]) {
-      node[@"awardings"] = @[];
-      node[@"isGildable"] = @NO;
-    }
-    if ([defaults boolForKey:kRedditFilterScores])
-      node[@"isScoreHidden"] = @YES;
-    if ([defaults boolForKey:kRedditFilterNSFW] && [node[@"isNsfw"] boolValue])
-      node[@"isHidden"] = @YES;
-  }
-  
-  // CellGroup handling
-  if ([node[@"__typename"] isEqualToString:@"CellGroup"]) {
-    // Helper to filter cells
-    NSMutableArray *cells = node[@"cells"];
-    if ([cells isKindOfClass:[NSMutableArray class]]) {
-        for (NSMutableDictionary *cell in cells) {
-          if (![cell isKindOfClass:NSMutableDictionary.class]) continue;
-
-          if ([cell[@"__typename"] isEqualToString:@"ActionCell"]) {
-            if ([defaults boolForKey:kRedditFilterAwards]) {
-              cell[@"isAwardHidden"] = @YES;
-              id goldenUpvoteInfo = cell[@"goldenUpvoteInfo"];
-              if ([goldenUpvoteInfo isKindOfClass:NSDictionary.class] &&
-                  ![goldenUpvoteInfo isEqual:[NSNull null]]) {
-                  // Ensure we can mutate it, though usually JSON deserialization with MutableContainers handles this
-                  if ([goldenUpvoteInfo isKindOfClass:NSMutableDictionary.class]) {
-                     ((NSMutableDictionary *)goldenUpvoteInfo)[@"isGildable"] = @NO;
-                  }
-              }
+    if ([typeName isEqualToString:@"SubredditPost"]) {
+        if (prefs.awards) {
+            node[@"awardings"] = @[];
+            node[@"isGildable"] = @NO;
+        }
+        if (prefs.scores) node[@"isScoreHidden"] = @YES;
+        if (prefs.nsfw && [node[@"isNsfw"] boolValue]) node[@"isHidden"] = @YES;
+    } 
+    else if ([typeName isEqualToString:@"Comment"]) {
+        if (prefs.awards) {
+            node[@"awardings"] = @[];
+            node[@"isGildable"] = @NO;
+        }
+        if (prefs.scores) node[@"isScoreHidden"] = @YES;
+        
+        if (prefs.automod) {
+            NSDictionary *authorInfo = node[@"authorInfo"];
+            if ([authorInfo isKindOfClass:NSDictionary.class] && [authorInfo[@"id"] isEqualToString:@"t2_6l4z3"]) {
+                node[@"isInitiallyCollapsed"] = @YES;
             }
-            if ([defaults boolForKey:kRedditFilterScores])
-              cell[@"isScoreHidden"] = @YES;
-          }
         }
     }
+    else if ([typeName isEqualToString:@"CellGroup"]) {
+        // 1. Check Promoted (AdPayloads)
+        if (prefs.promoted && [node[@"adPayload"] isKindOfClass:NSDictionary.class]) {
+            node[@"cells"] = @[];
+            return; // Exit early if we cleared the cells
+        }
 
-    // Check for ads in CellGroup
-    if ([defaults boolForKey:kRedditFilterPromoted] &&
-        [node[@"adPayload"] isKindOfClass:NSDictionary.class]) {
-      node[@"cells"] = @[];
-    }
-    
-    // Check for recommendations in CellGroup
-    if ([defaults boolForKey:kRedditFilterRecommended] &&
-        ![node[@"recommendationContext"] isEqual:[NSNull null]] &&
-        [node[@"recommendationContext"] isKindOfClass:NSDictionary.class]) {
-      NSDictionary *recommendationContext = node[@"recommendationContext"];
-      id typeName = recommendationContext[@"typeName"];
-      id typeIdentifier = recommendationContext[@"typeIdentifier"];
-      id isContextHidden = recommendationContext[@"isContextHidden"];
-      if (![typeIdentifier isEqual:[NSNull null]] && ![typeName isEqual:[NSNull null]] &&
-          ![isContextHidden isEqual:[NSNull null]] &&
-          [typeIdentifier isKindOfClass:NSString.class] &&
-          [typeName isKindOfClass:NSString.class] &&
-          [isContextHidden isKindOfClass:NSNumber.class]) {
-        if (!(([typeName isEqualToString:@"PopularRecommendationContext"] ||
-               [typeIdentifier hasPrefix:@"global_popular"]) &&
-              [isContextHidden boolValue])) {
-          node[@"cells"] = @[];
+        // 2. Check Recommended
+        if (prefs.recommended && [node[@"recommendationContext"] isKindOfClass:NSDictionary.class]) {
+            NSDictionary *recContext = node[@"recommendationContext"];
+            id recTypeName = recContext[@"typeName"];
+            id typeIdentifier = recContext[@"typeIdentifier"];
+            id isContextHidden = recContext[@"isContextHidden"];
+            
+            if ([recTypeName isKindOfClass:NSString.class] && 
+                [typeIdentifier isKindOfClass:NSString.class] && 
+                [isContextHidden isKindOfClass:NSNumber.class]) {
+                
+                if (!(([recTypeName isEqualToString:@"PopularRecommendationContext"] ||
+                       [typeIdentifier hasPrefix:@"global_popular"]) &&
+                      [isContextHidden boolValue])) {
+                    node[@"cells"] = @[];
+                    return; // Exit early if we cleared the cells
+                }
+            }
         }
-      }
+
+        // 3. Process remaining ActionCells ONLY if Awards or Scores filters are enabled
+        if (prefs.awards || prefs.scores) {
+            NSMutableArray *cells = node[@"cells"];
+            if ([cells isKindOfClass:NSMutableArray.class]) {
+                for (NSMutableDictionary *cell in cells) {
+                    if (![cell isKindOfClass:NSMutableDictionary.class]) continue;
+                    
+                    if ([cell[@"__typename"] isEqualToString:@"ActionCell"]) {
+                        if (prefs.awards) {
+                            cell[@"isAwardHidden"] = @YES;
+                            id goldenInfo = cell[@"goldenUpvoteInfo"];
+                            if ([goldenInfo isKindOfClass:NSMutableDictionary.class]) {
+                                ((NSMutableDictionary *)goldenInfo)[@"isGildable"] = @NO;
+                            }
+                        }
+                        if (prefs.scores) cell[@"isScoreHidden"] = @YES;
+                    }
+                }
+            }
+        }
     }
-  }
-  // Ad post
-  if ([defaults boolForKey:kRedditFilterPromoted]) {
-    if ([node[@"__typename"] isEqualToString:@"AdPost"]) {
-      node[@"isHidden"] = @YES;
+    else if ([typeName isEqualToString:@"AdPost"]) {
+        if (prefs.promoted) node[@"isHidden"] = @YES;
     }
-  }
-  // Comment
-  if ([node[@"__typename"] isEqualToString:@"Comment"]) {
-    if ([defaults boolForKey:kRedditFilterAwards]) {
-      node[@"awardings"] = @[];
-      node[@"isGildable"] = @NO;
-    }
-    if ([defaults boolForKey:kRedditFilterScores])
-      node[@"isScoreHidden"] = @YES;
-    if ([node[@"authorInfo"] isKindOfClass:NSDictionary.class] &&
-        [node[@"authorInfo"][@"id"] isEqualToString:@"t2_6l4z3"] &&
-        [defaults boolForKey:kRedditFilterAutoCollapseAutoMod])
-      node[@"isInitiallyCollapsed"] = @YES;
-  }
 }
 
 %hook NSURLSession
@@ -239,6 +240,17 @@ static void filterNode(NSMutableDictionary *node) {
         }
 
         NSMutableDictionary *json = (NSMutableDictionary *)jsonObject;
+
+        // Load preferences once per network request
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        RedditFilterPrefs prefs = {
+            [defaults boolForKey:kRedditFilterPromoted],
+            [defaults boolForKey:kRedditFilterRecommended],
+            [defaults boolForKey:kRedditFilterNSFW],
+            [defaults boolForKey:kRedditFilterAwards],
+            [defaults boolForKey:kRedditFilterScores],
+            [defaults boolForKey:kRedditFilterAutoCollapseAutoMod]
+        };
         
         // Identify the GraphQL Operation
         NSString *operationName = @"Unknown";
@@ -256,29 +268,12 @@ static void filterNode(NSMutableDictionary *node) {
             }
         }
 
-        // Ignore Telemetry & Configs (MASSIVE Performance Save)
-        // These requests do not contain feed posts or comments, so we do not need to filter them.
-        NSArray *ignoredOperations = @[
-            @"GetAccount", @"FetchIdentityPreferences", @"DynamicConfigsByNames",
-            @"GetAllExperimentVariants", @"AdsOffRedditLocation", @"UserLocation",
-            @"CookiePreferences", @"FetchSubscribedSubreddits", @"AdsOffRedditPreferences",
-            @"Age", @"RecommendedPrompts", @"EnrollInGamification", @"BadgeCounts",
-            @"GetEligibleUXExperiences", @"GetUserAdEligibility", @"GoldBalances",
-            @"PaymentSubscriptions", @"FeaturedDevvitGame", @"ModQueueNewItemCount",
-            @"LastModeratedSubredditName", @"AwardProductOffers", @"BlockedRedditors",
-            @"GamesPreferences", @"GetRedditUsersByIds", @"SubredditsForNames",
-            @"SubredditsForIds", @"ExposeExperimentBatch", @"GetProfilePostFlairTemplates",
-            @"GetRedditorByNameApollo", @"GetActiveSubreddits", @"GetMyShowcaseCarousel",
-            @"UserPublicTrophies", @"PostDraftsCount", @"BrandToolsStatus",
-            @"NotificationInbox", @"TrendingSearchesQuery"
-        ];
-        
-        if ([ignoredOperations containsObject:operationName]) {
-            // Instantly return the unmodified data. Do not log, do not traverse.
+        // Ignore Telemetry & Configs (Performance Saver)
+        if ([ignoredOperationsSet containsObject:operationName]) {
             return completionHandler(data, response, error);
         }
 
-        // 3. Fast Path Optimizations based on known schemas
+        // Fast Path based on known schemas
         if ([operationName isEqualToString:@"HomeFeedSdui"]) {
             if ([json valueForKeyPath:@"data.homeV3.elements.edges"]) {
                 for (NSMutableDictionary *edge in json[@"data"][@"homeV3"][@"elements"][@"edges"]) {
@@ -498,6 +493,21 @@ static void filterNode(NSMutableDictionary *node) {
   // Initialize caches
   imageCache = [[NSCache alloc] init];
   stringCache = [[NSCache alloc] init];
+
+  // Initialize Ignored Operations Set
+  ignoredOperationsSet = [[NSSet alloc] initWithObjects:
+      @"GetAccount", @"FetchIdentityPreferences", @"DynamicConfigsByNames",
+      @"GetAllExperimentVariants", @"AdsOffRedditLocation", @"UserLocation",
+      @"CookiePreferences", @"FetchSubscribedSubreddits", @"AdsOffRedditPreferences",
+      @"Age", @"RecommendedPrompts", @"EnrollInGamification", @"BadgeCounts",
+      @"GetEligibleUXExperiences", @"GetUserAdEligibility", @"GoldBalances",
+      @"PaymentSubscriptions", @"FeaturedDevvitGame", @"ModQueueNewItemCount",
+      @"LastModeratedSubredditName", @"AwardProductOffers", @"BlockedRedditors",
+      @"GamesPreferences", @"GetRedditUsersByIds", @"SubredditsForNames",
+      @"SubredditsForIds", @"ExposeExperimentBatch", @"GetProfilePostFlairTemplates",
+      @"GetRedditorByNameApollo", @"GetActiveSubreddits", @"GetMyShowcaseCarousel",
+      @"UserPublicTrophies", @"PostDraftsCount", @"BrandToolsStatus",
+      @"NotificationInbox", @"TrendingSearchesQuery", nil];
 
   assetBundles = [NSMutableArray array];
   assetCatalogs = [NSMutableArray array];
