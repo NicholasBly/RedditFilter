@@ -8,55 +8,6 @@
 #import <objc/runtime.h>
 #import "Preferences.h"
 
-static void appendLogToFile(NSString *logString) {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-        NSString *docDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-        NSString *logPath = [docDir stringByAppendingPathComponent:@"RedditFilter_SchemaPaths.txt"];
-        NSFileHandle *fileHandle = [NSFileHandle fileHandleForWritingAtPath:logPath];
-        if (!fileHandle) {
-            [logString writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        } else {
-            [fileHandle seekToEndOfFile];
-            [fileHandle writeData:[logString dataUsingEncoding:NSUTF8StringEncoding]];
-            [fileHandle closeFile];
-        }
-    });
-}
-
-static void findInterestingPaths(id node, NSString *currentPath, NSString *operationName) {
-    if ([node isKindOfClass:NSDictionary.class]) {
-        NSDictionary *dict = (NSDictionary *)node;
-        
-        if (dict[@"__typename"] && [dict[@"__typename"] isEqualToString:@"AdPost"]) {
-            appendLogToFile([NSString stringWithFormat:@"[%@] Promoted/Ad (AdPost) at: %@\n", operationName, currentPath]);
-        }
-        if (dict[@"adPayload"]) {
-            appendLogToFile([NSString stringWithFormat:@"[%@] Promoted/Ad (adPayload) at: %@\n", operationName, currentPath]);
-        }
-        if (dict[@"recommendationContext"] && ![dict[@"recommendationContext"] isEqual:[NSNull null]]) {
-            appendLogToFile([NSString stringWithFormat:@"[%@] Recommended at: %@\n", operationName, currentPath]);
-        }
-        if (dict[@"isNsfw"] && [dict[@"isNsfw"] boolValue]) {
-            appendLogToFile([NSString stringWithFormat:@"[%@] NSFW at: %@\n", operationName, currentPath]);
-        }
-        if (dict[@"awardings"] && [(NSArray *)dict[@"awardings"] count] > 0) {
-            appendLogToFile([NSString stringWithFormat:@"[%@] Awards at: %@\n", operationName, currentPath]);
-        }
-        if ([dict[@"authorInfo"] isKindOfClass:NSDictionary.class] && [dict[@"authorInfo"][@"id"] isEqualToString:@"t2_6l4z3"]) {
-            appendLogToFile([NSString stringWithFormat:@"[%@] AutoMod at: %@\n", operationName, currentPath]);
-        }
-        
-        for (NSString *key in dict) {
-            findInterestingPaths(dict[key], [NSString stringWithFormat:@"%@.%@", currentPath, key], operationName);
-        }
-    } else if ([node isKindOfClass:NSArray.class]) {
-        NSArray *arr = (NSArray *)node;
-        for (NSUInteger i = 0; i < arr.count; i++) {
-            findInterestingPaths(arr[i], [NSString stringWithFormat:@"%@[%lu]", currentPath, (unsigned long)i], operationName);
-        }
-    }
-}
-
 // --- Cache Setup ---
 static NSCache *imageCache;
 static NSCache *stringCache;
@@ -270,7 +221,8 @@ static void filterNode(NSMutableDictionary *node) {
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
                             completionHandler:(void (^)(NSData *data, NSURLResponse *response,
                                                         NSError *error))completionHandler {
-  if (![request.URL.host hasPrefix:@"gql"] && ![request.URL.host hasPrefix:@"oauth"])
+  if (![request.URL.host hasPrefix:@"gql"] && 
+      ![request.URL.host hasPrefix:@"oauth"])
     return %orig;
     
   void (^newCompletionHandler)(NSData *, NSURLResponse *, NSError *) =
@@ -287,56 +239,86 @@ static void filterNode(NSMutableDictionary *node) {
         }
 
         NSMutableDictionary *json = (NSMutableDictionary *)jsonObject;
-
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-            NSString *operationName = @"Unknown";
-            if (request.HTTPBody) {
-                NSDictionary *bodyJson = [NSJSONSerialization JSONObjectWithData:request.HTTPBody options:0 error:nil];
-                if (bodyJson[@"id"]) operationName = bodyJson[@"id"];
-                else if (bodyJson[@"operationName"]) operationName = bodyJson[@"operationName"];
-            } else if ([request.URL.query containsString:@"operationName="]) {
-                NSArray *components = [request.URL.query componentsSeparatedByString:@"&"];
-                for (NSString *param in components) {
-                    if ([param hasPrefix:@"operationName="]) {
-                        operationName = [param substringFromIndex:14];
-                        break;
-                    }
+        
+        // Identify the GraphQL Operation
+        NSString *operationName = @"Unknown";
+        if (request.HTTPBody) {
+            NSDictionary *bodyJson = [NSJSONSerialization JSONObjectWithData:request.HTTPBody options:0 error:nil];
+            if (bodyJson[@"id"]) operationName = bodyJson[@"id"];
+            else if (bodyJson[@"operationName"]) operationName = bodyJson[@"operationName"];
+        } else if ([request.URL.query containsString:@"operationName="]) {
+            NSArray *components = [request.URL.query componentsSeparatedByString:@"&"];
+            for (NSString *param in components) {
+                if ([param hasPrefix:@"operationName="]) {
+                    operationName = [param substringFromIndex:14];
+                    break;
                 }
             }
-            // Only log operations we actually care about so the file doesn't get massive
-            if ([operationName containsString:@"Feed"] || [operationName containsString:@"Post"] || [operationName containsString:@"Comments"]) {
-                findInterestingPaths(json, @"root", operationName);
+        }
+
+        // Fast Path by known schemas
+        if ([operationName isEqualToString:@"HomeFeedSdui"]) {
+            if ([json valueForKeyPath:@"data.homeV3.elements.edges"]) {
+                for (NSMutableDictionary *edge in json[@"data"][@"homeV3"][@"elements"][@"edges"]) {
+                    filterNode(edge[@"node"]);
+                }
             }
-        });
-        
-        if (json[@"data"] && [json[@"data"] isKindOfClass:NSDictionary.class]) {
-            NSDictionary *dataDict = json[@"data"];
-            NSMutableDictionary *root = dataDict.allValues.firstObject;
-            
-            if ([root isKindOfClass:NSDictionary.class]) {
-              if ([root.allValues.firstObject isKindOfClass:NSDictionary.class] &&
-                  root.allValues.firstObject[@"edges"])
-                for (NSMutableDictionary *edge in root.allValues.firstObject[@"edges"])
-                  filterNode(edge[@"node"]);
+        } else if ([operationName isEqualToString:@"PopularFeedSdui"]) {
+            // NEW: Fast path for Recommended and Promoted posts in the Popular feed
+            if ([json valueForKeyPath:@"data.popularV3.elements.edges"]) {
+                for (NSMutableDictionary *edge in json[@"data"][@"popularV3"][@"elements"][@"edges"]) {
+                    filterNode(edge[@"node"]);
+                }
+            }
+        } else if ([operationName isEqualToString:@"FeedPostDetailsByIds"]) {
+            if ([json valueForKeyPath:@"data.postsInfoByIds"]) {
+                for (NSMutableDictionary *node in json[@"data"][@"postsInfoByIds"]) {
+                    filterNode(node);
+                }
+            }
+        } else if ([operationName isEqualToString:@"PostInfoByIdComments"] || [operationName isEqualToString:@"PostInfoById"]) {
+            // This path automatically handles AutoMod, Awards, and NSFW inside comments
+            if ([json valueForKeyPath:@"data.postInfoById.commentForest.trees"]) {
+                for (NSMutableDictionary *tree in json[@"data"][@"postInfoById"][@"commentForest"][@"trees"]) {
+                    filterNode(tree[@"node"]);
+                }
+            }
+            if ([json valueForKeyPath:@"data.postInfoById"]) {
+                filterNode(json[@"data"][@"postInfoById"]);
+            }
+        } else {
+            // Original recursive logic for unknown queries fallback
+            if (json[@"data"] && [json[@"data"] isKindOfClass:NSDictionary.class]) {
+                NSDictionary *dataDict = json[@"data"];
+                NSMutableDictionary *root = dataDict.allValues.firstObject;
+                
+                if ([root isKindOfClass:NSDictionary.class]) {
+                  if ([root.allValues.firstObject isKindOfClass:NSDictionary.class] &&
+                      root.allValues.firstObject[@"edges"])
+                    for (NSMutableDictionary *edge in root.allValues.firstObject[@"edges"])
+                      filterNode(edge[@"node"]);
                   
-              if (root[@"commentForest"])
-                for (NSMutableDictionary *tree in root[@"commentForest"][@"trees"])
-                  filterNode(tree[@"node"]);
+                  if (root[@"commentForest"])
+                    for (NSMutableDictionary *tree in root[@"commentForest"][@"trees"])
+                      filterNode(tree[@"node"]);
                   
-              NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-              BOOL filterPromoted = [defaults boolForKey:kRedditFilterPromoted];
-              
-              if (root[@"commentsPageAds"] && filterPromoted)
-                root[@"commentsPageAds"] = @[];
-              if (root[@"commentTreeAds"] && filterPromoted)
-                root[@"commentTreeAds"] = @[];
-              if (root[@"pdpCommentsAds"] && filterPromoted)
-                root[@"pdpCommentsAds"] = @[];
-              if (root[@"recommendations"] && [defaults boolForKey:kRedditFilterRecommended])
-                root[@"recommendations"] = @[];
-            
-            } else if ([root isKindOfClass:NSArray.class]) {
-              for (NSMutableDictionary *node in (NSArray *)root) filterNode(node);
+                  NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+                  BOOL filterPromoted = [defaults boolForKey:kRedditFilterPromoted];
+                  
+                  if (root[@"commentsPageAds"] && filterPromoted)
+                    root[@"commentsPageAds"] = @[];
+                  
+                  if (root[@"commentTreeAds"] && filterPromoted)
+                    root[@"commentTreeAds"] = @[];
+                  
+                  if (root[@"pdpCommentsAds"] && filterPromoted)
+                    root[@"pdpCommentsAds"] = @[];
+                  
+                  if (root[@"recommendations"] && [defaults boolForKey:kRedditFilterRecommended])
+                    root[@"recommendations"] = @[];
+                } else if ([root isKindOfClass:NSArray.class]) {
+                  for (NSMutableDictionary *node in (NSArray *)root) filterNode(node);
+                }
             }
         }
         
