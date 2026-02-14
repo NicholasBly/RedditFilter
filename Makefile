@@ -29,3 +29,10 @@ ifeq ($(SIDELOADED),1)
 endif
 
 include $(THEOS_MAKE_PATH)/tweak.mk
+
+# Copy preference bundle resources to staging directory
+after-stage::
+	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/Library/PreferenceBundles/RedditFilter.bundle/en.lproj$(ECHO_END)
+	$(ECHO_NOTHING)if [ -d "layout/Library/Application Support/RedditFilter.bundle" ]; then \
+		cp -r "layout/Library/Application Support/RedditFilter.bundle"/* "$(THEOS_STAGING_DIR)/Library/PreferenceBundles/RedditFilter.bundle/"; \
+	fi$(ECHO_END)
