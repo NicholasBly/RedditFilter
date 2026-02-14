@@ -225,16 +225,16 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
   if (![request.URL.host hasPrefix:@"gql"] && 
       ![request.URL.host hasPrefix:@"oauth"])
     return %orig;
-    
+
   void (^newCompletionHandler)(NSData *, NSURLResponse *, NSError *) =
       ^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error || !data) return completionHandler(data, response, error);
-        
+
         NSError *jsonError = nil;
         id jsonObject = [NSJSONSerialization JSONObjectWithData:data
                                                         options:NSJSONReadingMutableContainers
                                                           error:&jsonError];
-                                                          
+
         if (jsonError || !jsonObject || ![jsonObject isKindOfClass:NSDictionary.class]) {
             return completionHandler(data, response, error);
         }
@@ -251,7 +251,7 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
             [defaults boolForKey:kRedditFilterScores],
             [defaults boolForKey:kRedditFilterAutoCollapseAutoMod]
         };
-        
+
         // Identify the GraphQL Operation
         NSString *operationName = @"Unknown";
         if (request.HTTPBody) {
@@ -277,29 +277,29 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
         if ([operationName isEqualToString:@"HomeFeedSdui"]) {
             if ([json valueForKeyPath:@"data.homeV3.elements.edges"]) {
                 for (NSMutableDictionary *edge in json[@"data"][@"homeV3"][@"elements"][@"edges"]) {
-                    filterNode(edge[@"node"]);
+                    filterNode(edge[@"node"], prefs);
                 }
             }
         } else if ([operationName isEqualToString:@"PopularFeedSdui"]) {
             if ([json valueForKeyPath:@"data.popularV3.elements.edges"]) {
                 for (NSMutableDictionary *edge in json[@"data"][@"popularV3"][@"elements"][@"edges"]) {
-                    filterNode(edge[@"node"]);
+                    filterNode(edge[@"node"], prefs);
                 }
             }
         } else if ([operationName isEqualToString:@"FeedPostDetailsByIds"]) {
             if ([json valueForKeyPath:@"data.postsInfoByIds"]) {
                 for (NSMutableDictionary *node in json[@"data"][@"postsInfoByIds"]) {
-                    filterNode(node);
+                    filterNode(node, prefs);
                 }
             }
         } else if ([operationName isEqualToString:@"PostInfoByIdComments"] || [operationName isEqualToString:@"PostInfoById"]) {
             if ([json valueForKeyPath:@"data.postInfoById.commentForest.trees"]) {
                 for (NSMutableDictionary *tree in json[@"data"][@"postInfoById"][@"commentForest"][@"trees"]) {
-                    filterNode(tree[@"node"]);
+                    filterNode(tree[@"node"], prefs);
                 }
             }
             if ([json valueForKeyPath:@"data.postInfoById"]) {
-                filterNode(json[@"data"][@"postInfoById"]);
+                filterNode(json[@"data"][@"postInfoById"], prefs);
             }
         } else if ([operationName isEqualToString:@"PdpCommentsAds"]) {
             // Instantly clear out Comment Ads
@@ -321,28 +321,28 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
                   if ([root.allValues.firstObject isKindOfClass:NSDictionary.class] &&
                       root.allValues.firstObject[@"edges"])
                     for (NSMutableDictionary *edge in root.allValues.firstObject[@"edges"])
-                      filterNode(edge[@"node"]);
-                  
+                      filterNode(edge[@"node"], prefs);
+                      
                   if (root[@"commentForest"])
                     for (NSMutableDictionary *tree in root[@"commentForest"][@"trees"])
-                      filterNode(tree[@"node"]);
-                  
+                      filterNode(tree[@"node"], prefs);
+                      
                   NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
                   BOOL filterPromoted = [defaults boolForKey:kRedditFilterPromoted];
                   
                   if (root[@"commentsPageAds"] && filterPromoted)
                     root[@"commentsPageAds"] = @[];
-                  
+                    
                   if (root[@"commentTreeAds"] && filterPromoted)
                     root[@"commentTreeAds"] = @[];
-                  
+                    
                   if (root[@"pdpCommentsAds"] && filterPromoted) // Kept just in case the fast path misses
                     root[@"pdpCommentsAds"] = @[];
-                  
+                    
                   if (root[@"recommendations"] && [defaults boolForKey:kRedditFilterRecommended])
                     root[@"recommendations"] = @[];
                 } else if ([root isKindOfClass:NSArray.class]) {
-                  for (NSMutableDictionary *node in (NSArray *)root) filterNode(node);
+                  for (NSMutableDictionary *node in (NSArray *)root) filterNode(node, prefs);
                 }
             }
         }
