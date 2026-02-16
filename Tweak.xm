@@ -175,8 +175,9 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
     else if ([typeName isEqualToString:@"CellGroup"]) {
         // 1. Check Promoted (AdPayloads)
         if (prefs.promoted && [node[@"adPayload"] isKindOfClass:NSDictionary.class]) {
-            node[@"isHidden"] = @YES;
-            return; 
+            node[@"cells"] = @[];
+            node[@"RedditFilter_ShouldRemove"] = @YES;
+            return; // Exit early if we cleared the cells
         }
 
         // 2. Check Recommended
@@ -193,9 +194,9 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
                 if (!(([recTypeName isEqualToString:@"PopularRecommendationContext"] ||
                        [typeIdentifier hasPrefix:@"global_popular"]) &&
                       [isContextHidden boolValue])) {
-                    
-                    node[@"isHidden"] = @YES;
-                    return; 
+                    node[@"cells"] = @[];
+                    node[@"RedditFilter_ShouldRemove"] = @YES;
+                    return;
                 }
             }
         }
@@ -284,14 +285,24 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
         // Fast Path based on known schemas
         if ([operationName isEqualToString:@"HomeFeedSdui"]) {
             if ([json valueForKeyPath:@"data.homeV3.elements.edges"]) {
-                for (NSMutableDictionary *edge in json[@"data"][@"homeV3"][@"elements"][@"edges"]) {
+                NSMutableArray *edges = json[@"data"][@"homeV3"][@"elements"][@"edges"];
+                for (NSInteger i = edges.count - 1; i >= 0; i--) {
+                    NSMutableDictionary *edge = edges[i];
                     filterNode(edge[@"node"], prefs);
+                    if (edge[@"node"][@"RedditFilter_ShouldRemove"]) {
+                        [edges removeObjectAtIndex:i];
+                    }
                 }
             }
         } else if ([operationName isEqualToString:@"PopularFeedSdui"]) {
             if ([json valueForKeyPath:@"data.popularV3.elements.edges"]) {
-                for (NSMutableDictionary *edge in json[@"data"][@"popularV3"][@"elements"][@"edges"]) {
+                NSMutableArray *edges = json[@"data"][@"popularV3"][@"elements"][@"edges"];
+                for (NSInteger i = edges.count - 1; i >= 0; i--) {
+                    NSMutableDictionary *edge = edges[i];
                     filterNode(edge[@"node"], prefs);
+                    if (edge[@"node"][@"RedditFilter_ShouldRemove"]) {
+                        [edges removeObjectAtIndex:i];
+                    }
                 }
             }
         } else if ([operationName isEqualToString:@"FeedPostDetailsByIds"]) {
@@ -327,9 +338,16 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
                 
                 if ([root isKindOfClass:NSDictionary.class]) {
                   if ([root.allValues.firstObject isKindOfClass:NSDictionary.class] &&
-                      root.allValues.firstObject[@"edges"])
-                    for (NSMutableDictionary *edge in root.allValues.firstObject[@"edges"])
-                      filterNode(edge[@"node"], prefs);
+                      root.allValues.firstObject[@"edges"]) {
+                    NSMutableArray *edges = root.allValues.firstObject[@"edges"];
+                    for (NSInteger i = edges.count - 1; i >= 0; i--) {
+                        NSMutableDictionary *edge = edges[i];
+                        filterNode(edge[@"node"], prefs);
+                        if (edge[@"node"][@"RedditFilter_ShouldRemove"]) {
+                            [edges removeObjectAtIndex:i];
+                        }
+                    }
+                  }
                       
                   if (root[@"commentForest"])
                     for (NSMutableDictionary *tree in root[@"commentForest"][@"trees"])
