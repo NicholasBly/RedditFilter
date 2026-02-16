@@ -8,10 +8,6 @@ on:
         description: "Build IPA and create draft release"
         default: false
         type: boolean
-      build_modern_arm64e:
-        description: "Build modern arm64e version (iOS 16+)"
-        default: false
-        type: boolean
       ipa_url:
         description: "Direct URL to Decrypted IPA file"
         type: string
@@ -95,35 +91,25 @@ jobs:
         run: |
           ./theos-jailed/install
 
-      - name: Build rootless deb (iOS 11 arm64)
+      - name: Build rootless deb
         run: make package
         env:
-          FINALPACKAGE: ${{ inputs.create_release && '1' || '0' }}
+          FINALPACKAGE: ${{ inputs.create_release }}
           THEOS_PACKAGE_SCHEME: rootless
 
-      - name: Build rootful deb (iOS 11 arm64)
+      - name: Build rootful deb
         run: make clean package
         env:
-          FINALPACKAGE: ${{ inputs.create_release && '1' || '0' }}
-
-      - name: Build rootless deb (iOS 16 arm64e)
-        if: ${{ inputs.build_modern_arm64e == true }}
-        run: make clean package
-        env:
-          FINALPACKAGE: ${{ inputs.create_release && '1' || '0' }}
-          THEOS_PACKAGE_SCHEME: rootless
-          MODERN_ARM64E: 1
+          FINALPACKAGE: ${{ inputs.create_release }}
 
       - name: Build IPA
         if: ${{ inputs.create_release }}
-        run: make clean package
+        run: make package
         env:
           FINALPACKAGE: 1
           SIDELOADED: 1
-          MODERN_ARM64E: ${{ inputs.build_modern_arm64e == true && '1' || '0' }}
           IPA: ${{ github.workspace }}/App.ipa
-          # Appends -arm64e to the output IPA filename if the box is checked
-          APP_VERSION: ${{ steps.ipa_info.outputs.version }}${{ inputs.build_modern_arm64e == true && '-arm64e' || '' }}
+          APP_VERSION: ${{ steps.ipa_info.outputs.version }}
 
       - name: Hash release files
         id: hash_files
@@ -132,18 +118,11 @@ jobs:
           echo "$(sha256sum packages/*)" >> $GITHUB_OUTPUT
           echo 'EOF' >> $GITHUB_OUTPUT
 
-      - name: Upload DEB Artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Jailbreak_DEBs
-          path: packages/*.deb
-
-      - name: Upload IPA Artifact
-        if: ${{ inputs.create_release }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: Sideloaded_IPA
-          path: packages/*.ipa
+          name: ${{ steps.package_info.outputs.id }}_${{ steps.package_info.outputs.version }}
+          path: packages/*
 
       - name: Create release
         if: ${{ inputs.create_release }}
