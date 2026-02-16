@@ -175,15 +175,8 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
     else if ([typeName isEqualToString:@"CellGroup"]) {
         // 1. Check Promoted (AdPayloads)
         if (prefs.promoted && [node[@"adPayload"] isKindOfClass:NSDictionary.class]) {
-            NSMutableArray *cells = node[@"cells"];
-            if ([cells isKindOfClass:NSMutableArray.class]) {
-                for (NSMutableDictionary *cell in cells) {
-                    if ([cell isKindOfClass:NSMutableDictionary.class]) {
-                        cell[@"isHidden"] = @YES;
-                    }
-                }
-            }
-            return;
+            node[@"isHidden"] = @YES;
+            return; 
         }
 
         // 2. Check Recommended
@@ -197,18 +190,12 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
                 [typeIdentifier isKindOfClass:NSString.class] && 
                 [isContextHidden isKindOfClass:NSNumber.class]) {
                 
-            if (!(([recTypeName isEqualToString:@"PopularRecommendationContext"] ||
-                    [typeIdentifier hasPrefix:@"global_popular"]) &&
-                    [isContextHidden boolValue])) {
-                    NSMutableArray *cells = node[@"cells"];
-                    if ([cells isKindOfClass:NSMutableArray.class]) {
-                        for (NSMutableDictionary *cell in cells) {
-                            if ([cell isKindOfClass:NSMutableDictionary.class]) {
-                                cell[@"isHidden"] = @YES;
-                            }
-                        }
-                    }
-                    return;
+                if (!(([recTypeName isEqualToString:@"PopularRecommendationContext"] ||
+                       [typeIdentifier hasPrefix:@"global_popular"]) &&
+                      [isContextHidden boolValue])) {
+                    
+                    node[@"isHidden"] = @YES;
+                    return; 
                 }
             }
         }
