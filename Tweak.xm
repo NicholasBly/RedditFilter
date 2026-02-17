@@ -45,8 +45,15 @@ extern "C" UIImage *iconWithName(NSString *iconName) {
             if ([imageName hasPrefix:iconName] &&
                 (imageName.length == iconName.length || imageName.length == iconName.length + 3)) {
                 
+                // SAFELY retrieve the private _bundle ivar
+                Ivar bundleIvar = class_getInstanceVariable(object_getClass(catalog), "_bundle");
+                if (!bundleIvar) continue;
+                
+                NSBundle *bundle = object_getIvar(catalog, bundleIvar);
+                if (!bundle) continue;
+
                 UIImage *image = [UIImage imageNamed:imageName
-                                            inBundle:object_getIvar(catalog, class_getInstanceVariable(object_getClass(catalog), "_bundle"))
+                                            inBundle:bundle
                        compatibleWithTraitCollection:nil];
                 
                 if (image) {
@@ -436,13 +443,15 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
 }
 %end
 
+// Create a static key for associated objects
+static char kConstraintsAddedKey;
+
 %hook ToggleImageTableViewCell
 - (void)updateConstraints {
     %orig;
 
     // Prevent adding duplicate constraints if updateConstraints is called multiple times.
-    // Use an associated object to track if we've already done this.
-    NSNumber *constraintsAdded = objc_getAssociatedObject(self, @selector(updateConstraints));
+    NSNumber *constraintsAdded = objc_getAssociatedObject(self, &kConstraintsAddedKey);
     if (constraintsAdded.boolValue) return;
 
     UIStackView *horizontalStackView = [self respondsToSelector:@selector(imageLabelView)]
@@ -482,7 +491,7 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
         ]];
         
         // Mark as added
-        objc_setAssociatedObject(self, @selector(updateConstraints), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(self, &kConstraintsAddedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }
 %end
