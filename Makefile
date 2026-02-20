@@ -1,11 +1,11 @@
 export LOGOS_DEFAULT_GENERATOR = internal
 
-TARGET := iphone:clang:latest:11.0
+TARGET := iphone:clang:latest:16.0
 INSTALL_TARGET_PROCESSES = RedditApp Reddit
 
 ARCHS = arm64
 
-PACKAGE_VERSION = 1.2.0
+PACKAGE_VERSION = 1.2.1
 ifdef APP_VERSION
   PACKAGE_VERSION := $(APP_VERSION)-$(PACKAGE_VERSION)
 endif
