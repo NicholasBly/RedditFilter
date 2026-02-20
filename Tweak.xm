@@ -233,21 +233,26 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
       ![request.URL.host hasPrefix:@"oauth"])
     return %orig;
 
+  // Prevent crashes if the underlying method passed a nil completion handler
+  if (!completionHandler) {
+      return %orig;
+  }
+
   void (^newCompletionHandler)(NSData *, NSURLResponse *, NSError *) =
       ^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (error || !data) return completionHandler(data, response, error);
+        // Safe bail-out to avoid executing NSJSONSerialization on empty/broken payloads
+        if (error || !data || data.length == 0) return completionHandler(data, response, error);
 
         NSError *jsonError = nil;
         id jsonObject = [NSJSONSerialization JSONObjectWithData:data
                                                         options:NSJSONReadingMutableContainers
                                                           error:&jsonError];
-
+                                                          
         if (jsonError || !jsonObject || ![jsonObject isKindOfClass:NSDictionary.class]) {
             return completionHandler(data, response, error);
         }
 
         NSMutableDictionary *json = (NSMutableDictionary *)jsonObject;
-
         // Load preferences once per network request
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         RedditFilterPrefs prefs = {
@@ -348,6 +353,7 @@ static void filterNode(NSMutableDictionary *node, RedditFilterPrefs prefs) {
                     
                   if (root[@"recommendations"] && [defaults boolForKey:kRedditFilterRecommended])
                     root[@"recommendations"] = @[];
+                    
                 } else if ([root isKindOfClass:NSArray.class]) {
                   for (NSMutableDictionary *node in (NSArray *)root) filterNode(node, prefs);
                 }
