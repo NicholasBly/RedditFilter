@@ -3,7 +3,6 @@
 extern NSBundle *redditFilterBundle;
 extern UIImage *iconWithName(NSString *iconName);
 extern Class CoreClass(NSString *name);
-
 #define LOC(x, d) [redditFilterBundle localizedStringForKey:x value:d table:nil]
 
 %subclass FeedFilterSettingsViewController : BaseTableViewController
@@ -30,7 +29,6 @@ extern Class CoreClass(NSString *name);
     case 0: {
       toggleCell = [tableView dequeueReusableCellWithIdentifier:kToggleCellID
                                                    forIndexPath:indexPath];
-
       switch (indexPath.row) {
         case 0:
           mainLabelText = LOC(@"filter.settings.promoted.title", @"Promoted");
@@ -105,11 +103,9 @@ extern Class CoreClass(NSString *name);
 
   ([cell respondsToSelector:@selector(mainLabel)] ? cell.mainLabel : cell.imageLabelView.mainLabel)
       .text = mainLabelText;
-
   ([cell respondsToSelector:@selector(detailLabel)] ? cell.detailLabel
                                                     : cell.imageLabelView.detailLabel)
       .text = detailLabelText;
-
   UIImage *iconImage;
   for (NSString *iconName in iconNames) {
     iconImage = iconWithName(iconName);
@@ -182,9 +178,14 @@ extern Class CoreClass(NSString *name);
 - (void)viewDidLoad {
   %orig;
   self.title = @"RedditFilter";
-  [self.tableView registerClass:CoreClass(@"ToggleImageTableViewCell")
+  
+  // Provide safe fallbacks to prevent crashes if Reddit removes/renames classes
+  Class toggleCellClass = CoreClass(@"ToggleImageTableViewCell") ?: [UITableViewCell class];
+  Class labelCellClass = CoreClass(@"ImageLabelTableViewCell") ?: [UITableViewCell class];
+  
+  [self.tableView registerClass:toggleCellClass
          forCellReuseIdentifier:kToggleCellID];
-  [self.tableView registerClass:CoreClass(@"ImageLabelTableViewCell")
+  [self.tableView registerClass:labelCellClass
          forCellReuseIdentifier:kLabelCellID];
 }
 %new
