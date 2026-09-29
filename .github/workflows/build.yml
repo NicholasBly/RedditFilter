@@ -16,6 +16,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write  # read TweakDash's hidden draft and create the draft release
 
     steps:
       - uses: actions/checkout@v4
@@ -59,8 +61,16 @@ jobs:
 
       - name: Download IPA (Manual)
         if: ${{ inputs.create_release && inputs.ipa_url }}
+        env:
+          IPA_URL: ${{ inputs.ipa_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl -Lo "${{ github.workspace }}/App.ipa" "${{ inputs.ipa_url }}"
+          if [[ "$IPA_URL" == https://api.github.com/* ]]; then
+            # A hidden draft uploaded by TweakDash; only this repo's own token can read it
+            curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" "$IPA_URL" -o "${{ github.workspace }}/App.ipa"
+          else
+            curl -Lo "${{ github.workspace }}/App.ipa" "$IPA_URL"
+          fi
           zip -T "${{ github.workspace }}/App.ipa"
 
       - name: Get IPA Info
