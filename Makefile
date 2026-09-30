@@ -5,7 +5,7 @@ INSTALL_TARGET_PROCESSES = RedditApp Reddit
 
 ARCHS = arm64
 
-PACKAGE_VERSION = 1.2.6
+PACKAGE_VERSION = 1.2.7
 # Shown in the About section of the settings screen (saved before the app version gets added below)
 RF_VERSION := $(PACKAGE_VERSION)
 ifdef APP_VERSION
