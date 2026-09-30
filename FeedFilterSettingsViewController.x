@@ -124,7 +124,7 @@ static const RFAboutRow kAboutRows[] = {
     {@"RedditFilter", nil, @"https://github.com/NicholasBly/RedditFilter/releases",
      @"line.3.horizontal.decrease.circle"},
     {@"Nicholas Bly", @"Developer", @"https://github.com/NicholasBly/RedditFilter", nil},
-    {@"level3tjg", @"Original creator · RedditFilter is forked from his project",
+    {@"level3tjg", @"Original creator",
      @"https://github.com/level3tjg/RedditFilter", @"person.crop.circle"},
 };
 static const NSInteger kAboutRowCount = sizeof(kAboutRows) / sizeof(kAboutRows[0]);
