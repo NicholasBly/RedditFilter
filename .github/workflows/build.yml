@@ -13,8 +13,8 @@ on:
         type: string
         required: false
       debug_menu:
-        description: "Include the debug menu"
-        default: true
+        description: "Include debug menu"
+        default: false
         type: boolean
 
 jobs:
@@ -22,6 +22,9 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write  # read TweakDash's hidden draft and create the draft release
+    env:
+      # "1" when the "Include debug menu" box is ticked, otherwise "0" (also for normal pushes)
+      DEBUG_MENU: ${{ inputs.debug_menu && '1' || '0' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -92,31 +95,6 @@ jobs:
           cache-dir-theos: ${{ github.workspace }}/theos
           cache-dir-sdks: ${{ github.workspace }}/theos/sdks
 
-      - name: Set Debug Variables
-        id: debug_vars
-        env:
-          EVENT: ${{ github.event_name }}
-          DEBUG_MENU: ${{ inputs.debug_menu }}
-          BRANCH: ${{ github.ref_name }}
-        run: |
-          # Started by hand or by TweakDash: the "Include the debug menu" box decides.
-          # Started by a push: the branch decides, as before.
-          if [ "$EVENT" == "workflow_dispatch" ]; then
-            debug="$DEBUG_MENU"
-          elif [ "$BRANCH" == "main" ]; then
-            debug=false
-          else
-            debug=true
-          fi
-          if [ "$debug" == "true" ]; then
-            echo "Debug Menu ON"
-            echo "cflags=-DREDDITFILTER_DEBUG=1" >> $GITHUB_OUTPUT
-          else
-            echo "Debug Menu OFF"
-            echo "cflags=-DREDDITFILTER_DEBUG=0" >> $GITHUB_OUTPUT
-          fi
-          echo "debug=$debug" >> $GITHUB_OUTPUT
-
       - name: Checkout theos-jailed
         if: ${{ inputs.create_release }}
         uses: actions/checkout@v4
@@ -135,13 +113,11 @@ jobs:
         env:
           FINALPACKAGE: ${{ inputs.create_release }}
           THEOS_PACKAGE_SCHEME: rootless
-          ADDITIONAL_CFLAGS: ${{ steps.debug_vars.outputs.cflags }}
 
       - name: Build rootful deb
         run: make clean package
         env:
           FINALPACKAGE: ${{ inputs.create_release }}
-          ADDITIONAL_CFLAGS: ${{ steps.debug_vars.outputs.cflags }}
 
       - name: Build IPA
         if: ${{ inputs.create_release }}
@@ -151,10 +127,9 @@ jobs:
           SIDELOADED: 1
           IPA: ${{ github.workspace }}/App.ipa
           APP_VERSION: ${{ steps.ipa_info.outputs.version }}
-          ADDITIONAL_CFLAGS: ${{ steps.debug_vars.outputs.cflags }}
 
       - name: Append Debug Suffix to IPA
-        if: ${{ inputs.create_release && steps.debug_vars.outputs.debug == 'true' }}
+        if: ${{ inputs.create_release && inputs.debug_menu }}
         run: |
           for file in packages/*.ipa; do
             if [ -f "$file" ]; then
@@ -176,5 +151,5 @@ jobs:
         with:
           draft: true
           files: packages/*.ipa
-          tag_name: v${{ steps.ipa_info.outputs.version }}-${{ steps.package_info.outputs.version }}
+          tag_name: v${{ steps.ipa_info.outputs.version }}-${{ steps.package_info.outputs.version }}${{ inputs.debug_menu && '-debug' || '' }}
           body: ${{ steps.hash_files.outputs.hashes }}
