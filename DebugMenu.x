@@ -46,7 +46,7 @@ static const NSUInteger kRFMaxArrayProbe = 6; // array elements descended into
 
     // Seed the known operations so the menu lists every path up front, even
     // before any matching traffic has been observed. Keep these in sync with
-    // the hardcoded paths in Tweak.xm.
+    // the hardcoded paths in JSONFilter.m.
     [self seedOperation:@"HomeFeedSdui" expected:@"data.homeV3.elements.edges"];
     [self seedOperation:@"PopularFeedSdui" expected:@"data.popularV3.elements.edges"];
     [self seedOperation:@"FeedPostDetailsByIds" expected:@"data.postsInfoByIds"];

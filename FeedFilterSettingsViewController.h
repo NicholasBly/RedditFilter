@@ -6,7 +6,6 @@
 #import <ToggleImageTableViewCell.h>
 
 @interface UIView ()
-@property(nonatomic, readonly, assign) CGFloat frameWidth;
 - (void)associatePropertySetter:(SEL)propertySetter
         withThemePropertyGetter:(SEL)themePropertyGetter;
 @end
