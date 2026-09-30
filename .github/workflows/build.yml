@@ -12,6 +12,10 @@ on:
         description: "Direct URL to Decrypted IPA file"
         type: string
         required: false
+      debug_menu:
+        description: "Include the debug menu"
+        default: true
+        type: boolean
 
 jobs:
   build:
@@ -90,14 +94,28 @@ jobs:
 
       - name: Set Debug Variables
         id: debug_vars
+        env:
+          EVENT: ${{ github.event_name }}
+          DEBUG_MENU: ${{ inputs.debug_menu }}
+          BRANCH: ${{ github.ref_name }}
         run: |
-          if [ "${{ github.ref_name }}" == "main" ]; then
-            echo "Building on main: Debug Menu OFF"
-            echo "cflags=-DREDDITFILTER_DEBUG=0" >> $GITHUB_OUTPUT
+          # Started by hand or by TweakDash: the "Include the debug menu" box decides.
+          # Started by a push: the branch decides, as before.
+          if [ "$EVENT" == "workflow_dispatch" ]; then
+            debug="$DEBUG_MENU"
+          elif [ "$BRANCH" == "main" ]; then
+            debug=false
           else
-            echo "Building on ${{ github.ref_name }}: Debug Menu ON"
-            echo "cflags=-DREDDITFILTER_DEBUG=1" >> $GITHUB_OUTPUT
+            debug=true
           fi
+          if [ "$debug" == "true" ]; then
+            echo "Debug Menu ON"
+            echo "cflags=-DREDDITFILTER_DEBUG=1" >> $GITHUB_OUTPUT
+          else
+            echo "Debug Menu OFF"
+            echo "cflags=-DREDDITFILTER_DEBUG=0" >> $GITHUB_OUTPUT
+          fi
+          echo "debug=$debug" >> $GITHUB_OUTPUT
 
       - name: Checkout theos-jailed
         if: ${{ inputs.create_release }}
@@ -136,7 +154,7 @@ jobs:
           ADDITIONAL_CFLAGS: ${{ steps.debug_vars.outputs.cflags }}
 
       - name: Append Debug Suffix to IPA
-        if: ${{ inputs.create_release && github.ref_name != 'main' }}
+        if: ${{ inputs.create_release && steps.debug_vars.outputs.debug == 'true' }}
         run: |
           for file in packages/*.ipa; do
             if [ -f "$file" ]; then
