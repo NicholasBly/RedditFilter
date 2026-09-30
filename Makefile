@@ -6,6 +6,8 @@ INSTALL_TARGET_PROCESSES = RedditApp Reddit
 ARCHS = arm64
 
 PACKAGE_VERSION = 1.2.6
+# Shown in the About section of the settings screen (saved before the app version gets added below)
+RF_VERSION := $(PACKAGE_VERSION)
 ifdef APP_VERSION
   PACKAGE_VERSION := $(APP_VERSION)-$(PACKAGE_VERSION)
 endif
@@ -21,6 +23,8 @@ TWEAK_NAME = RedditFilter
 
 $(TWEAK_NAME)_FILES = $(wildcard *.x*) $(wildcard *.m)
 $(TWEAK_NAME)_CFLAGS = -fobjc-arc -Iinclude -Wno-module-import-in-extern-c
+
+$(TWEAK_NAME)_CFLAGS += -DRF_VERSION='"$(RF_VERSION)"'
 
 # Debug menu: off unless you build with DEBUG_MENU=1 (the GitHub build has a checkbox for it)
 ifeq ($(DEBUG_MENU),1)

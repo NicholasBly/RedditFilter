@@ -1,6 +1,11 @@
 #import <objc/runtime.h>
 #import "FeedFilterSettingsViewController.h"
 #import "DebugMenu.h"
+#import "RFLogo.h"
+
+#ifndef RF_VERSION
+#define RF_VERSION "dev" // the Makefile passes the real version
+#endif
 
 #pragma mark - The filter rows
 
@@ -93,6 +98,93 @@ static UIView *RFSectionView(UITableView *tableView, NSString *text, CGFloat hei
   return container;
 }
 
+#pragma mark - Sections
+
+typedef NS_ENUM(NSInteger, RFSection) { RFSectionFilters, RFSectionDebug, RFSectionAbout };
+
+// Filters, [Schema Paths (debug builds only)], About
+static const NSInteger kSectionCount = REDDITFILTER_DEBUG ? 3 : 2;
+
+static RFSection RFSectionAt(NSInteger section) {
+  if (section == 0) return RFSectionFilters;
+  if (REDDITFILTER_DEBUG && section == 1) return RFSectionDebug;
+  return RFSectionAbout;
+}
+
+#pragma mark - About section
+
+typedef struct {
+  __unsafe_unretained NSString *title;
+  __unsafe_unretained NSString *subtitle; // nil = show the version
+  __unsafe_unretained NSString *link;     // opened when the row is tapped
+  __unsafe_unretained NSString *symbol;   // SF Symbol name, or nil to show the logo
+} RFAboutRow;
+
+static const RFAboutRow kAboutRows[] = {
+    {@"RedditFilter", nil, @"https://github.com/NicholasBly/RedditFilter/releases",
+     @"line.3.horizontal.decrease.circle"},
+    {@"Nicholas Bly", @"Developer", @"https://github.com/NicholasBly/RedditFilter", nil},
+    {@"level3tjg", @"Original creator · RedditFilter is forked from his project",
+     @"https://github.com/level3tjg/RedditFilter", @"person.crop.circle"},
+};
+static const NSInteger kAboutRowCount = sizeof(kAboutRows) / sizeof(kAboutRows[0]);
+static const CGFloat kAboutIconSize = 36.0;
+
+// Draws an image centered in a fixed-size square so every row's text lines up.
+static UIImage *RFBoxedImage(UIImage *image, CGFloat inset) {
+  if (!image) return nil;
+  CGSize box = CGSizeMake(kAboutIconSize, kAboutIconSize);
+  CGFloat side = kAboutIconSize - inset * 2;
+  CGFloat scale = MIN(side / image.size.width, side / image.size.height);
+  CGSize size = CGSizeMake(image.size.width * scale, image.size.height * scale);
+  UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:box];
+  UIImage *boxed = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+    [image drawInRect:CGRectMake((box.width - size.width) / 2, (box.height - size.height) / 2, size.width,
+                                 size.height)];
+  }];
+  return [boxed imageWithRenderingMode:image.renderingMode];
+}
+
+static UIImage *RFLogo(void) {
+  static UIImage *logo;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    NSData *data = [NSData dataWithBytesNoCopy:(void *)kRFLogoPNG length:sizeof(kRFLogoPNG) freeWhenDone:NO];
+    logo = RFBoxedImage([UIImage imageWithData:data], 0);
+  });
+  return logo;
+}
+
+static NSString *RFVersionText(void) {
+  return [@"Version " @RF_VERSION stringByAppendingString:REDDITFILTER_DEBUG ? @" (debug build)" : @""];
+}
+
+static UITableViewCell *RFAboutCell(UITableView *tableView, NSInteger index) {
+  static NSString *const kAboutCellID = @"RFAboutCell";
+  UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kAboutCellID];
+  if (!cell) {
+    // A plain UIKit cell, colored with Reddit's theme when it's available.
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:kAboutCellID];
+    cell.textLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
+    cell.detailTextLabel.font = [UIFont systemFontOfSize:13.0];
+    cell.detailTextLabel.numberOfLines = 0;
+    cell.textLabel.textColor = UIColor.labelColor;
+    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+    cell.imageView.tintColor = UIColor.secondaryLabelColor;
+    RFApplyTheme(cell.textLabel, @selector(setTextColor:), @selector(bodyTextColor));
+    RFApplyTheme(cell.detailTextLabel, @selector(setTextColor:), @selector(metaTextColor));
+    RFApplyTheme(cell.imageView, @selector(setTintColor:), @selector(metaTextColor));
+    RFApplyTheme(cell, @selector(setBackgroundColor:), @selector(bodyColor));
+  }
+  if (index < 0 || index >= kAboutRowCount) return cell;
+  const RFAboutRow *row = &kAboutRows[index];
+  cell.textLabel.text = row->title;
+  cell.detailTextLabel.text = row->subtitle ?: RFVersionText();
+  cell.imageView.image = row->symbol ? RFBoxedImage([UIImage systemImageNamed:row->symbol], 7.0) : RFLogo();
+  cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+  return cell;
+}
+
 #if REDDITFILTER_DEBUG
 // Declarations for the debug-only helpers so the call sites below are typed.
 // (The implementations are added to the class at runtime by Logos below.)
@@ -128,20 +220,30 @@ static UIView *RFSectionView(UITableView *tableView, NSString *text, CGFloat hei
 
 %new
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-  return REDDITFILTER_DEBUG ? 2 : 1;
+  return kSectionCount;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+  switch (RFSectionAt(section)) {
+    case RFSectionFilters:
+      return kToggleRowCount;
+    case RFSectionDebug:
 #if REDDITFILTER_DEBUG
-  // One row per tracked schema path, plus a trailing "reset" row.
-  if (section == 1) return [[RFSchemaDebug shared] snapshot].count + 1;
+      // One row per tracked schema path, plus a trailing "reset" row.
+      return [[RFSchemaDebug shared] snapshot].count + 1;
 #endif
-  return section == 0 ? kToggleRowCount : 0;
+      return 0;
+    case RFSectionAbout:
+      return kAboutRowCount;
+  }
+  return 0;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+  RFSection section = RFSectionAt(indexPath.section);
+  if (section == RFSectionAbout) return RFAboutCell(tableView, indexPath.row);
 #if REDDITFILTER_DEBUG
-  if (indexPath.section == 1) return [self debugCellForRow:indexPath.row inTableView:tableView];
+  if (section == RFSectionDebug) return [self debugCellForRow:indexPath.row inTableView:tableView];
 #endif
   ToggleImageTableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kToggleCellID
                                                                    forIndexPath:indexPath];
@@ -176,8 +278,21 @@ static UIView *RFSectionView(UITableView *tableView, NSString *text, CGFloat hei
 }
 
 %new
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+  [tableView deselectRowAtIndexPath:indexPath animated:YES];
+  if (RFSectionAt(indexPath.section) != RFSectionAbout || indexPath.row >= kAboutRowCount) return;
+  NSURL *url = [NSURL URLWithString:kAboutRows[indexPath.row].link];
+  if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+}
+
+%new
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-  NSString *text = section == 0 ? @"FILTERS" : (REDDITFILTER_DEBUG && section == 1) ? @"SCHEMA PATHS · DEBUG" : nil;
+  NSString *text = nil;
+  switch (RFSectionAt(section)) {
+    case RFSectionFilters: text = @"FILTERS"; break;
+    case RFSectionDebug: text = @"SCHEMA PATHS · DEBUG"; break;
+    case RFSectionAbout: text = @"ABOUT"; break;
+  }
   return RFSectionView(tableView, text, 40.0);
 }
 
@@ -189,16 +304,23 @@ static UIView *RFSectionView(UITableView *tableView, NSString *text, CGFloat hei
 %new
 - (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section {
   NSString *text = nil;
-  if (section == 0) text = @"Filter specific types of posts from your feed";
-  else if (REDDITFILTER_DEBUG && section == 1)
-    text = @"✓ resolved · ✗ broke (structural fallback is now filtering). "
-           @"Tap Copy on a ✗ row to grab the auto-discovered replacement path.";
+  switch (RFSectionAt(section)) {
+    case RFSectionFilters:
+      text = @"Filter specific types of posts from your feed";
+      break;
+    case RFSectionDebug:
+      text = @"✓ resolved · ✗ broke (structural fallback is now filtering). "
+             @"Tap Copy on a ✗ row to grab the auto-discovered replacement path.";
+      break;
+    case RFSectionAbout:
+      break; // no footer, just some space at the bottom
+  }
   return RFSectionView(tableView, text, [self tableView:tableView heightForFooterInSection:section]);
 }
 
 %new
 - (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section {
-  return (REDDITFILTER_DEBUG && section == 1) ? 76.0 : 40.0;
+  return RFSectionAt(section) == RFSectionDebug ? 76.0 : 40.0;
 }
 
 // ---------------------------------------------------------------------------
