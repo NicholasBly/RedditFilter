@@ -14,15 +14,17 @@
 //   * surfaces all of that in a debug section of the RedditFilter menu so the
 //     corrected path can be copied straight out of the app.
 //
-// EVERYTHING here is gated behind REDDITFILTER_DEBUG. Set it to 0 (or define it
-// to 0 via the build) for a release build and the tracker, the recording call
-// sites, and the debug menu all compile away to nothing.
+// EVERYTHING here is gated behind REDDITFILTER_DEBUG. When it is 0 (the
+// default) the tracker, the recording call sites, and the debug menu all
+// compile away to nothing.
+//
+// To turn it on: tick "Include debug menu" when running the GitHub build, or
+// build locally with `make package DEBUG_MENU=1`.
 
-#import <Foundation/Foundation.h> // Move this to the top!
+#import <Foundation/Foundation.h>
 
 #ifndef REDDITFILTER_DEBUG
-// 1 on the test branch. Flip to 0 (or pass -DREDDITFILTER_DEBUG=0) for release.
-#define REDDITFILTER_DEBUG 1
+#define REDDITFILTER_DEBUG 0
 #endif
 
 // Identifies the *shape* of the data that is expected at a given schema path so
@@ -75,15 +77,17 @@ extern NSString *const kRFDebugFailedJSON;    // NSString  captured JSON on fail
 // Recording macro used at the call sites. In a release build it expands to a
 // no-op and, because none of its parameters appear in the replacement text,
 // the arguments (including any block/enum tokens) are discarded entirely.
-#define RF_RECORD_SCHEMA(op, expected, resolved, json, sig)                    \
-  [[RFSchemaDebug shared] recordOperation:(op)                                 \
-                             expectedPath:(expected)                           \
-                                 resolved:(resolved)                           \
-                                     json:(json)                               \
-                                signature:(sig)]
+// (Parameter names start with an underscore so they can't collide with the
+// selector keywords below, e.g. `resolved:` and `json:`.)
+#define RF_RECORD_SCHEMA(_op, _expected, _resolved, _json, _sig)               \
+  [[RFSchemaDebug shared] recordOperation:(_op)                                \
+                             expectedPath:(_expected)                          \
+                                 resolved:(_resolved)                          \
+                                     json:(_json)                              \
+                                signature:(_sig)]
 
 #else // !REDDITFILTER_DEBUG
 
-#define RF_RECORD_SCHEMA(op, expected, resolved, json, sig) ((void)0)
+#define RF_RECORD_SCHEMA(_op, _expected, _resolved, _json, _sig) ((void)0)
 
 #endif // REDDITFILTER_DEBUG

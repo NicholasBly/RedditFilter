@@ -5,7 +5,9 @@ INSTALL_TARGET_PROCESSES = RedditApp Reddit
 
 ARCHS = arm64
 
-PACKAGE_VERSION = 1.2.5
+PACKAGE_VERSION = 1.2.7
+# Shown in the About section of the settings screen (saved before the app version gets added below)
+RF_VERSION := $(PACKAGE_VERSION)
 ifdef APP_VERSION
   PACKAGE_VERSION := $(APP_VERSION)-$(PACKAGE_VERSION)
 endif
@@ -21,6 +23,13 @@ TWEAK_NAME = RedditFilter
 
 $(TWEAK_NAME)_FILES = $(wildcard *.x*) $(wildcard *.m)
 $(TWEAK_NAME)_CFLAGS = -fobjc-arc -Iinclude -Wno-module-import-in-extern-c
+
+$(TWEAK_NAME)_CFLAGS += -DRF_VERSION='"$(RF_VERSION)"'
+
+# Debug menu: off unless you build with DEBUG_MENU=1 (the GitHub build has a checkbox for it)
+ifeq ($(DEBUG_MENU),1)
+  $(TWEAK_NAME)_CFLAGS += -DREDDITFILTER_DEBUG=1
+endif
 $(TWEAK_NAME)_INJECT_DYLIBS = $(THEOS_OBJ_DIR)/RedditSideloadFix.dylib
 
 ifeq ($(SIDELOADED),1)
@@ -30,9 +39,3 @@ endif
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
-# Copy preference bundle resources to staging directory
-after-stage::
-	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/Library/PreferenceBundles/RedditFilter.bundle/en.lproj$(ECHO_END)
-	$(ECHO_NOTHING)if [ -d "layout/Library/Application Support/RedditFilter.bundle" ]; then \
-		cp -r "layout/Library/Application Support/RedditFilter.bundle"/* "$(THEOS_STAGING_DIR)/Library/PreferenceBundles/RedditFilter.bundle/"; \
-	fi$(ECHO_END)
