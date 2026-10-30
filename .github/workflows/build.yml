@@ -19,6 +19,9 @@ on:
 
 jobs:
   build:
+    # Ubuntu 22.04 on purpose: the Linux iOS compiler that theos-action downloads only exists for
+    # 22.04 and older (none for 24.04), and GitHub keeps 22.04 runners until April 2027.
+    # The macos-26 branch has a version that builds on macOS 26 instead.
     runs-on: ubuntu-22.04
     permissions:
       contents: write  # read TweakDash's hidden draft and create the draft release
@@ -27,7 +30,7 @@ jobs:
       DEBUG_MENU: ${{ inputs.debug_menu && '1' || '0' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
@@ -51,8 +54,10 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y build-essential checkinstall git autoconf automake libtool-bin llvm xmlstarlet
-          curl -L https://github.com/libimobiledevice/libplist/releases/download/2.6.0/libplist-2.6.0.tar.bz2 | bzip2 -d | tar -x
-          cd libplist*
+          curl -fsSL -o libplist.tar.bz2 https://github.com/libimobiledevice/libplist/releases/download/2.8.0/libplist-2.8.0.tar.bz2
+          echo "b1f59f7634c58b2481325a23ff4e3bf51574a42d868cbe466d2b39b04550752a  libplist.tar.bz2" | sha256sum -c -
+          tar -xjf libplist.tar.bz2
+          cd libplist-2.8.0
           ./configure
           sudo make install
           sudo ldconfig
@@ -97,7 +102,7 @@ jobs:
 
       - name: Checkout theos-jailed
         if: ${{ inputs.create_release }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: level3tjg/theos-jailed
           path: theos-jailed
@@ -147,7 +152,7 @@ jobs:
 
       - name: Create release
         if: ${{ inputs.create_release }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           draft: true
           files: packages/*.ipa
