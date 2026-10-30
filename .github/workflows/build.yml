@@ -19,15 +19,21 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    # macOS 26 with Xcode 26's compiler (free for public repos). Ubuntu 24.04 can't be used:
+    # the Linux iOS compiler that theos-action downloads only exists for Ubuntu 22.04 and older.
+    runs-on: macos-26
     permissions:
       contents: write  # read TweakDash's hidden draft and create the draft release
     env:
       # "1" when the "Include debug menu" box is ticked, otherwise "0" (also for normal pushes)
       DEBUG_MENU: ${{ inputs.debug_menu && '1' || '0' }}
+      # Pinned, so a change upstream can't break the build without an edit here.
+      THEOS: ${{ github.workspace }}/theos
+      THEOS_COMMIT: 6e7b8c40e0f5f9f5b2377800dc1e42cd2560d24a
+      SDKS_COMMIT: 0222fd5413cf4b9af096f37b4621afa2688572f7
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
@@ -43,19 +49,14 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y rsync
+          # ldid signs, GNU make >= 4 builds in parallel (macOS ships 3.81), and GNU rsync
+          # instead of macOS's openrsync for Theos's staging.
+          brew install ldid make rsync
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
       - name: Install theos-jailed dependencies
         if: ${{ inputs.create_release }}
-        run: |
-          sudo apt update
-          sudo apt install -y build-essential checkinstall git autoconf automake libtool-bin llvm xmlstarlet
-          curl -L https://github.com/libimobiledevice/libplist/releases/download/2.6.0/libplist-2.6.0.tar.bz2 | bzip2 -d | tar -x
-          cd libplist*
-          ./configure
-          sudo make install
-          sudo ldconfig
+        run: brew install libplist xmlstarlet
 
       - name: Download IPA (Auto)
         if: ${{ inputs.create_release && !inputs.ipa_url }}
@@ -88,16 +89,26 @@ jobs:
           echo "bundle-id=$(echo $info | xmlstarlet sel -t -v "/plist/dict/key[text()=\"CFBundleIdentifier\"]/following-sibling::*[1]/text()")" >> $GITHUB_OUTPUT
           echo "version=$(echo $info | xmlstarlet sel -t -v "/plist/dict/key[text()=\"CFBundleShortVersionString\"]/following-sibling::*[1]/text()")" >> $GITHUB_OUTPUT
 
-      - name: Setup theos
-        uses: level3tjg/theos-action@main
-        with:
-          cache: true
-          cache-dir-theos: ${{ github.workspace }}/theos
-          cache-dir-sdks: ${{ github.workspace }}/theos/sdks
+      - name: Install Theos (pinned)
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/theos/theos.git "$THEOS"
+          git -C "$THEOS" checkout --quiet "$THEOS_COMMIT"
+          git -C "$THEOS" submodule update --quiet --init --recursive
+
+      - name: Install the iOS 16.5 SDK (pinned)
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/theos/sdks.git "$RUNNER_TEMP/sdks"
+          git -C "$RUNNER_TEMP/sdks" sparse-checkout init --cone
+          git -C "$RUNNER_TEMP/sdks" sparse-checkout set iPhoneOS16.5.sdk
+          git -C "$RUNNER_TEMP/sdks" checkout --quiet "$SDKS_COMMIT"
+          mkdir -p "$THEOS/sdks"
+          cp -R "$RUNNER_TEMP/sdks/iPhoneOS16.5.sdk" "$THEOS/sdks/iPhoneOS16.5.sdk"
 
       - name: Checkout theos-jailed
         if: ${{ inputs.create_release }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: level3tjg/theos-jailed
           path: theos-jailed
@@ -142,12 +153,12 @@ jobs:
         id: hash_files
         run: |
           echo 'hashes<<EOF' >> $GITHUB_OUTPUT
-          echo "$(sha256sum packages/*)" >> $GITHUB_OUTPUT
+          echo "$(shasum -a 256 packages/*)" >> $GITHUB_OUTPUT
           echo 'EOF' >> $GITHUB_OUTPUT
 
       - name: Create release
         if: ${{ inputs.create_release }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           draft: true
           files: packages/*.ipa
