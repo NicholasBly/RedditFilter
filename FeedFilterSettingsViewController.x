@@ -2,6 +2,7 @@
 #import "FeedFilterSettingsViewController.h"
 #import "DebugMenu.h"
 #import "RFLogo.h"
+#import "TapInspector.h"
 
 #ifndef RF_VERSION
 #define RF_VERSION "dev" // the Makefile passes the real version
@@ -100,14 +101,15 @@ static UIView *RFSectionView(UITableView *tableView, NSString *text, CGFloat hei
 
 #pragma mark - Sections
 
-typedef NS_ENUM(NSInteger, RFSection) { RFSectionFilters, RFSectionDebug, RFSectionAbout };
+typedef NS_ENUM(NSInteger, RFSection) { RFSectionFilters, RFSectionDebug, RFSectionTaps, RFSectionAbout };
 
-// Filters, [Schema Paths (debug builds only)], About
-static const NSInteger kSectionCount = REDDITFILTER_DEBUG ? 3 : 2;
+// Filters, [Schema Paths, Tap Inspector (debug builds only)], About
+static const NSInteger kSectionCount = REDDITFILTER_DEBUG ? 4 : 2;
 
 static RFSection RFSectionAt(NSInteger section) {
   if (section == 0) return RFSectionFilters;
   if (REDDITFILTER_DEBUG && section == 1) return RFSectionDebug;
+  if (REDDITFILTER_DEBUG && section == 2) return RFSectionTaps;
   return RFSectionAbout;
 }
 
@@ -193,6 +195,9 @@ static UITableViewCell *RFAboutCell(UITableView *tableView, NSInteger index) {
 - (void)rfCopyDiscoveredPath:(UIButton *)sender;
 - (void)rfCopyFailedJSON:(UIButton *)sender;
 - (void)rfResetCounters:(UIButton *)sender;
+- (UITableViewCell *)tapInspectorCellForRow:(NSInteger)row inTableView:(UITableView *)tableView;
+- (void)rfCopyTapReport:(UIButton *)sender;
+- (void)rfClearTapReport:(UIButton *)sender;
 @end
 #endif
 
@@ -233,6 +238,8 @@ static UITableViewCell *RFAboutCell(UITableView *tableView, NSInteger index) {
       return [[RFSchemaDebug shared] snapshot].count + 1;
 #endif
       return 0;
+    case RFSectionTaps:
+      return REDDITFILTER_DEBUG ? 2 : 0; // summary + copy, clear
     case RFSectionAbout:
       return kAboutRowCount;
   }
@@ -244,6 +251,7 @@ static UITableViewCell *RFAboutCell(UITableView *tableView, NSInteger index) {
   if (section == RFSectionAbout) return RFAboutCell(tableView, indexPath.row);
 #if REDDITFILTER_DEBUG
   if (section == RFSectionDebug) return [self debugCellForRow:indexPath.row inTableView:tableView];
+  if (section == RFSectionTaps) return [self tapInspectorCellForRow:indexPath.row inTableView:tableView];
 #endif
   ToggleImageTableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kToggleCellID
                                                                    forIndexPath:indexPath];
@@ -291,6 +299,7 @@ static UITableViewCell *RFAboutCell(UITableView *tableView, NSInteger index) {
   switch (RFSectionAt(section)) {
     case RFSectionFilters: text = @"FILTERS"; break;
     case RFSectionDebug: text = @"SCHEMA PATHS · DEBUG"; break;
+    case RFSectionTaps: text = @"TAP INSPECTOR · DEBUG"; break;
     case RFSectionAbout: text = @"ABOUT"; break;
   }
   return RFSectionView(tableView, text, 40.0);
@@ -312,6 +321,10 @@ static UITableViewCell *RFAboutCell(UITableView *tableView, NSInteger index) {
       text = @"✓ resolved · ✗ broke (structural fallback is now filtering). "
              @"Tap Copy on a ✗ row to grab the auto-discovered replacement path.";
       break;
+    case RFSectionTaps:
+      text = @"Records taps on the feed that open nothing. When a tap goes dead, tap it 2–3 more times, "
+             @"then come here and Copy the report.";
+      break;
     case RFSectionAbout:
       break; // no footer, just some space at the bottom
   }
@@ -320,7 +333,8 @@ static UITableViewCell *RFAboutCell(UITableView *tableView, NSInteger index) {
 
 %new
 - (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section {
-  return RFSectionAt(section) == RFSectionDebug ? 76.0 : 40.0;
+  RFSection kind = RFSectionAt(section);
+  return (kind == RFSectionDebug || kind == RFSectionTaps) ? 76.0 : 40.0;
 }
 
 // ---------------------------------------------------------------------------
@@ -479,6 +493,64 @@ static UITableViewCell *RFAboutCell(UITableView *tableView, NSInteger index) {
 - (void)rfResetCounters:(UIButton *)sender {
 #if REDDITFILTER_DEBUG
   [[RFSchemaDebug shared] reset];
+  [self.tableView reloadData];
+#endif
+}
+// ---------------------------------------------------------------------------
+// Tap inspector section (debug builds only; see TapInspector.h).
+// ---------------------------------------------------------------------------
+%new
+- (UITableViewCell *)tapInspectorCellForRow:(NSInteger)row inTableView:(UITableView *)tableView {
+#if REDDITFILTER_DEBUG
+  static NSString *const kRFTapCellID = @"RFTapInspectorCell";
+  UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kRFTapCellID];
+  if (!cell) {
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:kRFTapCellID];
+    cell.detailTextLabel.numberOfLines = 0;
+    cell.textLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+    cell.detailTextLabel.font = [UIFont systemFontOfSize:12.0];
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+  }
+  UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+  button.titleLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold];
+  cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+  if (row == 0) {
+    cell.textLabel.textColor = UIColor.labelColor;
+    cell.textLabel.text = @"Dead taps";
+    cell.detailTextLabel.text = RFTapInspectorSummary();
+    [button setTitle:@"Copy report" forState:UIControlStateNormal];
+    [button addTarget:self action:@selector(rfCopyTapReport:) forControlEvents:UIControlEventTouchUpInside];
+  } else {
+    cell.textLabel.textColor = UIColor.systemBlueColor;
+    cell.textLabel.text = @"Clear";
+    cell.detailTextLabel.text = @"Start a fresh recording";
+    [button setTitle:@"Clear" forState:UIControlStateNormal];
+    [button addTarget:self action:@selector(rfClearTapReport:) forControlEvents:UIControlEventTouchUpInside];
+  }
+  [button sizeToFit];
+  cell.accessoryView = button;
+  return cell;
+#else
+  return nil;
+#endif
+}
+%new
+- (void)rfCopyTapReport:(UIButton *)sender {
+#if REDDITFILTER_DEBUG
+  UIPasteboard.generalPasteboard.string = RFTapInspectorReport();
+  [sender setTitle:@"Copied" forState:UIControlStateNormal];
+  [sender sizeToFit];
+  __weak UIButton *weakSender = sender;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [weakSender setTitle:@"Copy report" forState:UIControlStateNormal];
+    [weakSender sizeToFit];
+  });
+#endif
+}
+%new
+- (void)rfClearTapReport:(UIButton *)sender {
+#if REDDITFILTER_DEBUG
+  RFTapInspectorReset();
   [self.tableView reloadData];
 #endif
 }

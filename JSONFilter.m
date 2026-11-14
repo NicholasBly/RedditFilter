@@ -55,16 +55,32 @@ static BOOL RFIsHomeRecommendation(id context) {
   return !popularFiller;
 }
 
-// Returns YES if it changed anything.
-static BOOL RFFilterNode(id object, const RFContext *ctx) {
+// What the filter decided for one object.
+typedef NS_ENUM(NSInteger, RFVerdict) {
+  RFVerdictKeep,    // nothing to do
+  RFVerdictChanged, // edited in place (awards, scores, AutoMod collapse)
+  RFVerdictHide,    // the whole post should disappear
+};
+
+// Hides a post where it sits, for places where it can't be taken out of its
+// list (lookups by id, a single post, the last item on a page).
+static void RFHideInPlace(NSMutableDictionary *node) {
+  if ([RFString(node[@"__typename"]) isEqualToString:@"CellGroup"])
+    node[@"cells"] = @[];
+  else
+    node[@"isHidden"] = @YES;
+}
+
+static RFVerdict RFFilterNode(id object, const RFContext *ctx) {
   NSMutableDictionary *node = RFMutableDict(object);
   NSString *type = RFString(node[@"__typename"]);
-  if (!type) return NO;
+  if (!type) return RFVerdictKeep;
   RFPrefs p = ctx->prefs;
   BOOL changed = NO;
 
   BOOL isPost = [type isEqualToString:@"SubredditPost"];
   if (isPost || [type isEqualToString:@"Comment"]) {
+    if (isPost && p.nsfw && RFTrue(node[@"isNsfw"])) return RFVerdictHide;
     if (p.awards) {
       node[@"awardings"] = @[];
       node[@"isGildable"] = @NO;
@@ -74,38 +90,25 @@ static BOOL RFFilterNode(id object, const RFContext *ctx) {
       node[@"isScoreHidden"] = @YES;
       changed = YES;
     }
-    if (isPost && p.nsfw && RFTrue(node[@"isNsfw"])) {
-      node[@"isHidden"] = @YES;
-      changed = YES;
-    }
     if (!isPost && p.automod &&
         [RFString(RFDict(node[@"authorInfo"])[@"id"]) isEqualToString:kAutoModAccountId]) {
       node[@"isInitiallyCollapsed"] = @YES;
       changed = YES;
     }
-    return changed;
+    return changed ? RFVerdictChanged : RFVerdictKeep;
   }
 
-  if ([type isEqualToString:@"AdPost"]) {
-    if (!p.promoted) return NO;
-    node[@"isHidden"] = @YES;
-    return YES;
-  }
+  if ([type isEqualToString:@"AdPost"]) return p.promoted ? RFVerdictHide : RFVerdictKeep;
 
-  if (![type isEqualToString:@"CellGroup"]) return NO;
+  if (![type isEqualToString:@"CellGroup"]) return RFVerdictKeep;
 
-  // Promoted: ads carry an adPayload. Emptying the cells hides the whole post.
-  if (p.promoted && RFDict(node[@"adPayload"])) {
-    node[@"cells"] = @[];
-    return YES;
-  }
+  // Promoted: ads carry an adPayload.
+  if (p.promoted && RFDict(node[@"adPayload"])) return RFVerdictHide;
 
   // Recommended: Home feed only. Popular (and other discovery feeds) are made
   // entirely of recommendations, so doing this there wipes the whole feed.
-  if (p.recommended && ctx->homeFeed && RFIsHomeRecommendation(node[@"recommendationContext"])) {
-    node[@"cells"] = @[];
-    return YES;
-  }
+  if (p.recommended && ctx->homeFeed && RFIsHomeRecommendation(node[@"recommendationContext"]))
+    return RFVerdictHide;
 
   if (p.awards || p.scores) {
     for (id item in RFArray(node[@"cells"])) {
@@ -119,21 +122,61 @@ static BOOL RFFilterNode(id object, const RFContext *ctx) {
       changed = YES;
     }
   }
-  return changed;
+  return changed ? RFVerdictChanged : RFVerdictKeep;
 }
 
-// An array of nodes, e.g. postsInfoByIds.
+// Filters one object that has to stay where it is. Returns YES if it changed.
+static BOOL RFFilterInPlace(id object, const RFContext *ctx) {
+  RFVerdict verdict = RFFilterNode(object, ctx);
+  if (verdict == RFVerdictHide) RFHideInPlace(RFMutableDict(object));
+  return verdict != RFVerdictKeep;
+}
+
+// An array of nodes the app looks up by id (e.g. postsInfoByIds): entries are
+// hidden in place, never removed.
 static BOOL RFFilterNodes(NSArray *nodes, const RFContext *ctx) {
   BOOL changed = NO;
-  for (id node in nodes) changed |= RFFilterNode(node, ctx);
+  for (id node in nodes) changed |= RFFilterInPlace(node, ctx);
   return changed;
 }
 
-// An array of { node: ... } wrappers: feed edges and comment trees.
-static BOOL RFFilterEdges(NSArray *edges, const RFContext *ctx) {
+// Comment trees: comments are edited, never removed.
+static BOOL RFFilterTrees(NSArray *trees, const RFContext *ctx) {
   BOOL changed = NO;
-  for (id edge in edges) changed |= RFFilterNode(RFDict(edge)[@"node"], ctx);
+  for (id edge in trees) changed |= RFFilterInPlace(RFDict(edge)[@"node"], ctx);
   return changed;
+}
+
+// A feed page: an array of { node: ... } edges. Hidden posts are taken out of
+// the page completely. Up to 1.2.7 they were emptied in place instead, which
+// left a blank, invisible item in Reddit's feed for every hidden post.
+static BOOL RFFilterEdges(NSArray *edges, const RFContext *ctx) {
+  NSMutableIndexSet *hidden = [NSMutableIndexSet indexSet];
+  BOOL changed = NO;
+  NSUInteger index = 0;
+  for (id edge in edges) {
+    RFVerdict verdict = RFFilterNode(RFDict(edge)[@"node"], ctx);
+    if (verdict == RFVerdictHide) [hidden addIndex:index];
+    changed |= verdict != RFVerdictKeep;
+    index++;
+  }
+  if (!hidden.count) return changed;
+
+  NSMutableArray *page = [edges isKindOfClass:NSMutableArray.class] ? (NSMutableArray *)edges : nil;
+  if (page && hidden.count == page.count) {
+    // Never hand back an empty page, in case the app reads that as the end of
+    // the feed. Keep the last item, hidden in place, so paging carries on.
+    RFHideInPlace(RFMutableDict(RFDict(page.lastObject)[@"node"]));
+    [hidden removeIndex:page.count - 1];
+  }
+  if (page) {
+    [page removeObjectsAtIndexes:hidden];
+  } else {
+    [hidden enumerateIndexesUsingBlock:^(NSUInteger i, BOOL *stop) {
+      RFHideInPlace(RFMutableDict(RFDict([edges objectAtIndex:i])[@"node"]));
+    }];
+  }
+  return YES;
 }
 
 static BOOL RFClearKeys(NSMutableDictionary *dict, NSArray *keys) {
@@ -165,7 +208,7 @@ static BOOL RFFilterGeneric(NSDictionary *payload, const RFContext *ctx) {
     for (id child in dict.allValues) changed |= RFFilterEdges(RFArray(RFDict(child)[@"edges"]), ctx);
 
     // Comments: <root>.commentForest.trees
-    changed |= RFFilterEdges(RFArray(RFValueAtPath(dict, @"commentForest.trees")), ctx);
+    changed |= RFFilterTrees(RFArray(RFValueAtPath(dict, @"commentForest.trees")), ctx);
 
     if (ctx->prefs.promoted)
       changed |= RFClearKeys(dict, @[ @"commentsPageAds", @"commentTreeAds", @"pdpCommentsAds" ]);
@@ -199,8 +242,8 @@ static BOOL RFFilterPostInfo(NSMutableDictionary *json, NSDictionary *payload, c
   BOOL resolved = trees || (post && (!forest || forest == [NSNull null]));
   RF_RECORD_SCHEMA(@"PostInfoById", @"data.postInfoById.commentForest.trees", resolved, json, RFSchemaSigTrees);
 
-  BOOL changed = resolved ? RFFilterEdges(trees, ctx) : RFFilterGeneric(payload, ctx);
-  changed |= RFFilterNode(post, ctx);
+  BOOL changed = resolved ? RFFilterTrees(trees, ctx) : RFFilterGeneric(payload, ctx);
+  changed |= RFFilterInPlace(post, ctx);
   return changed;
 }
 
