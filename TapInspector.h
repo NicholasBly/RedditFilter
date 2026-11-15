@@ -22,4 +22,8 @@ NSString *RFTapInspectorReport(void);
 // Forget everything recorded so far.
 void RFTapInspectorReset(void);
 
+// Called by DeadTapFix.x when a touch would have landed on the stuck
+// pull-to-refresh control and was passed through to the post instead.
+void RFTapInspectorNoteRefreshControlPassThrough(void);
+
 #endif

@@ -26,7 +26,8 @@ static const NSUInteger kKeepGood = 4;
 
 static NSMutableArray<NSString *> *gDeadReports, *gGoodReports;
 static NSUInteger gTapCount, gDeadCount;
-static CFTimeInterval gLastNavigation, gLastTapHandler;
+static CFTimeInterval gLastNavigation, gLastTapHandler, gLastPassThrough;
+static NSUInteger gPassThroughTaps; // taps DeadTapFix.x sent past the stuck refresh control
 static NSString *gLastTapHandlerName;
 
 // The touch being followed (at most one; multi-finger touches are ignored).
@@ -209,12 +210,15 @@ static void RFTapFinished(NSString *snapshot, CFTimeInterval start, CFTimeInterv
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kResultWindow * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     BOOL navigated = gLastNavigation >= start;
     BOOL handled = gLastTapHandler >= start;
+    BOOL passedThrough = gLastPassThrough >= start;
+    if (passedThrough) gPassThroughTaps++;
     NSDateFormatter *formatter = [NSDateFormatter new];
     formatter.dateFormat = @"HH:mm:ss.SSS";
     NSString *when = [formatter stringFromDate:[NSDate dateWithTimeIntervalSinceNow:-(CACurrentMediaTime() - start)]];
     NSString *verdict = navigated ? @"opened a screen"
                         : handled ? [NSString stringWithFormat:@"tap handler ran (%@) but nothing opened", gLastTapHandlerName]
                                   : @"DEAD: nothing opened and no post tap handler ran";
+    if (passedThrough) verdict = [verdict stringByAppendingString:@" [went through the stuck pull-to-refresh]"];
     NSString *report = [NSString stringWithFormat:@"tap #%lu at %@, %.2fs, moved %.1fpt: %@\n%@", (unsigned long)number,
                                                   when, duration, moved, verdict, snapshot];
     if (navigated || handled) {
@@ -348,8 +352,17 @@ static void RFInstallTapHandlerHooks(void) {
 #pragma mark - Menu API
 
 NSString *RFTapInspectorSummary(void) {
-  return [NSString stringWithFormat:@"%lu dead tap%@ out of %lu tap%@ on the feed", (unsigned long)gDeadCount,
-                                    gDeadCount == 1 ? @"" : @"s", (unsigned long)gTapCount, gTapCount == 1 ? @"" : @"s"];
+  NSString *summary = [NSString stringWithFormat:@"%lu dead tap%@ out of %lu tap%@ on the feed", (unsigned long)gDeadCount,
+                                                 gDeadCount == 1 ? @"" : @"s", (unsigned long)gTapCount,
+                                                 gTapCount == 1 ? @"" : @"s"];
+  if (gPassThroughTaps)
+    summary = [summary stringByAppendingFormat:@"\n%lu tap%@ went through the stuck pull-to-refresh (dead tap fix)",
+                                               (unsigned long)gPassThroughTaps, gPassThroughTaps == 1 ? @"" : @"s"];
+  return summary;
+}
+
+void RFTapInspectorNoteRefreshControlPassThrough(void) {
+  gLastPassThrough = CACurrentMediaTime();
 }
 
 NSString *RFTapInspectorReport(void) {
@@ -373,7 +386,7 @@ NSString *RFTapInspectorReport(void) {
 void RFTapInspectorReset(void) {
   [gDeadReports removeAllObjects];
   [gGoodReports removeAllObjects];
-  gTapCount = gDeadCount = 0;
+  gTapCount = gDeadCount = gPassThroughTaps = 0;
 }
 
 %ctor {
